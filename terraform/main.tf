@@ -16,22 +16,22 @@ resource "aws_db_parameter_group" "perf_schema" {
 
   # Consumer parameters - expose as many as available for your engine version
   parameter {
-    name  = "performance_schema_consumer_events_statements_current"
+    name  = "performance-schema-consumer-events-statements-current"
     value = "1"
   }
 
   parameter {
-    name  = "performance_schema_consumer_events_statements_history"
+    name  = "performance-schema-consumer-events-statements-history"
     value = "1"
   }
 
   parameter {
-    name  = "performance_schema_consumer_events_statements_history_long"
+    name  = "performance-schema-consumer-events-statements-history-long"
     value = "0"
   }
 
   parameter {
-    name  = "performance_schema_consumer_events_waits_current"
+    name  = "performance-schema-consumer-events-waits-current"
     value = "0"
   }
 
@@ -135,11 +135,21 @@ resource "aws_security_group" "lambda_sg" {
   description = "Security group for Performance Schema Lambda function"
   vpc_id      = var.vpc_id
 
+  # Primary egress rule - Security Group reference (for same-VPC connections)
   egress {
     from_port       = 3306
     to_port         = 3306
     protocol        = "tcp"
     security_group_id = var.create_proxy ? aws_security_group.proxy_sg[0].id : var.db_security_group_id
+  }
+  
+  # Fallback egress rule - CIDR blocks (for cross-VPC connections)
+  egress {
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    cidr_blocks     = var.db_subnet_cidrs
+    description     = "Fallback for cross-VPC connections"
   }
 
   tags = var.tags
@@ -244,12 +254,21 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Effect   = "Allow",
         Resource = "*"
       },
+      {
+        Action = [
+          "s3:GetObject"
+        ],
+        Effect   = "Allow",
+        Resource = var.sql_s3_bucket != "" ? "arn:aws:s3:::${var.sql_s3_bucket}/${var.sql_s3_key}" : "*"
+      },
       var.use_iam_auth ? {
         Action = [
           "rds-db:connect"
         ],
         Effect   = "Allow",
-        Resource = "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:${var.is_aurora ? var.db_cluster_resource_id : var.db_instance_resource_id}/lambda_perf_schema"
+        Resource = var.is_aurora ? 
+          "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:cluster-${var.db_cluster_resource_id}/lambda_perf_schema" :
+          "arn:aws:rds-db:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:dbuser:dbi-${var.db_instance_resource_id}/lambda_perf_schema"
       } : {
         Action = [
           "secretsmanager:GetSecretValue"
@@ -286,7 +305,9 @@ resource "aws_lambda_function" "perf_schema_lambda" {
       DB_HOST                  = var.db_host
       SNS_TOPIC_ARN            = var.sns_topic_arn
       PERFORMANCE_SCHEMA_HASH  = var.performance_schema_hash
-      SQL_UPDATE_STATEMENTS    = var.sql_update_statements
+      # SQL statements are stored in S3 to avoid hitting the 4KB env var limit
+      SQL_S3_BUCKET            = var.sql_s3_bucket
+      SQL_S3_KEY               = var.sql_s3_key
     }
   }
 
@@ -298,13 +319,32 @@ resource "aws_lambda_function" "perf_schema_lambda" {
   tags = var.tags
 }
 
-# Lambda Code
+# Lambda Code and Dependencies
+# Note: Before applying, run the following commands to prepare the Lambda package with dependencies:
+# mkdir -p ${path.module}/lambda-build
+# pip install pymysql -t ${path.module}/lambda-build
+# cp ${path.module}/lambda/index.py ${path.module}/lambda-build/
+# cd ${path.module}/lambda-build && zip -r ../lambda_function.zip .
+
 data "archive_file" "lambda_zip" {
   type        = "zip"
   output_path = "${path.module}/lambda_function.zip"
-  source {
-    content  = file("${path.module}/lambda/index.py")
-    filename = "index.py"
+  source_dir  = "${path.module}/lambda-build"
+  depends_on  = [null_resource.install_dependencies]
+}
+
+# Null resource to install dependencies
+resource "null_resource" "install_dependencies" {
+  triggers = {
+    always_run = "${timestamp()}" # Run on every apply to ensure fresh dependencies
+  }
+
+  provisioner "local-exec" {
+    command = <<EOF
+      mkdir -p ${path.module}/lambda-build
+      pip install pymysql -t ${path.module}/lambda-build
+      cp ${path.module}/lambda/index.py ${path.module}/lambda-build/
+    EOF
   }
 }
 
@@ -329,7 +369,7 @@ resource "aws_cloudwatch_event_rule" "perf_schema_events" {
 
   event_pattern = jsonencode({
     source      = ["aws.rds"],
-    "detail-type" = ["RDS DB Instance Event", "RDS DB Cluster Event"],
+    "detail-type" = ["RDS DB Instance Event"],
     detail = {
       EventID = [
         "RDS-EVENT-0004", # DB instance restarted
@@ -337,7 +377,33 @@ resource "aws_cloudwatch_event_rule" "perf_schema_events" {
         "RDS-EVENT-0046", # Multi-AZ failover to replica completed
         "RDS-EVENT-0071", # DB instance point-in-time restore completed
         "RDS-EVENT-0025", # DB instance recovery completed
-        "RDS-EVENT-0006"  # DB instance reboot completed
+        "RDS-EVENT-0006", # DB instance reboot completed
+        "RDS-EVENT-0221", # Storage autoscaling initiated
+        "RDS-EVENT-0225"  # Storage autoscaling completed
+      ]
+    }
+  })
+
+  tags = var.tags
+}
+
+# Specific rule for Aurora cluster events
+resource "aws_cloudwatch_event_rule" "aurora_cluster_events" {
+  count       = var.is_aurora ? 1 : 0
+  name        = "${var.prefix}-perf-schema-aurora-cluster-events"
+  description = "Detect Aurora cluster events that require Performance Schema reconfiguration"
+
+  event_pattern = jsonencode({
+    source      = ["aws.rds"],
+    "detail-type" = ["RDS DB Cluster Event"],
+    detail = {
+      EventID = [
+        "RDS-EVENT-0069", # Cluster failover completed
+        "RDS-EVENT-0070", # Cluster failover initiated
+        "RDS-EVENT-0071", # Cluster restore completed
+        "RDS-EVENT-0091", # Writer instance changed
+        "RDS-EVENT-0141", # Cluster topology changed
+        "RDS-EVENT-0173"  # Cluster maintenance complete
       ]
     }
   })
@@ -349,6 +415,22 @@ resource "aws_cloudwatch_event_target" "perf_schema_events_target" {
   rule      = aws_cloudwatch_event_rule.perf_schema_events.name
   target_id = "PerformanceSchemaLambda"
   arn       = aws_lambda_function.perf_schema_lambda.arn
+}
+
+resource "aws_cloudwatch_event_target" "aurora_cluster_events_target" {
+  count     = var.is_aurora ? 1 : 0
+  rule      = aws_cloudwatch_event_rule.aurora_cluster_events[0].name
+  target_id = "PerformanceSchemaLambda"
+  arn       = aws_lambda_function.perf_schema_lambda.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_aurora_events" {
+  count         = var.is_aurora ? 1 : 0
+  statement_id  = "AllowExecutionFromEventBridgeAuroraEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.perf_schema_lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.aurora_cluster_events[0].arn
 }
 
 # Lambda permission for EventBridge

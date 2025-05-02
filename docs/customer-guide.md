@@ -1,49 +1,71 @@
-# Customer Guide: Optimizing Performance Schema for New Relic Monitoring
+# Customer Guide: Optimizing MySQL Monitoring with New Relic and AWS (2025)
 
 ## Introduction
 
-This guide helps you optimize MySQL Performance Schema (P_S) on AWS RDS and Aurora to ensure efficient monitoring with New Relic while minimizing system overhead and data costs.
+This guide helps you optimize MySQL monitoring on AWS RDS and Aurora using New Relic, with a primary focus on leveraging AWS Performance Insights (PI) complemented by targeted Performance Schema (P_S) configurations where needed.
 
-### Why Optimize Performance Schema?
+### The Challenge of Database Monitoring
 
-Performance Schema provides critical insights into your database performance, but the default configuration can:
+Effective database monitoring provides critical performance insights, but improper configuration can:
 
 1. **Generate excessive data volume** - increasing New Relic ingest costs
-2. **Consume unnecessary system resources** - adding CPU overhead of 5-15%
+2. **Consume unnecessary system resources** - adding significant CPU overhead
 3. **Create monitoring noise** - making it harder to identify real issues
-4. **Reset after restarts/failovers** - causing inconsistent observability
+4. **Reset consumer & instrument rows after restarts/failovers** - causing inconsistent observability (parameter group variables persist)
 
-### Key Benefits of Optimized Configuration
+### Key Benefits of Our Recommended Approach
 
 * **Reduced costs** - Lower New Relic data ingest volume (typically 40-70% savings)
-* **Improved performance** - Minimal overhead on production databases
+* **Improved performance** - Typically adds less than 5% CPU overhead
 * **Focused monitoring** - Capture only metrics that drive actionable insights
-* **Consistent visibility** - Automated configuration ensures persistent monitoring
-* **Compliance** - Auditable, consistent monitoring configuration across environments
+* **Consistent visibility** - AWS-managed configuration ensures persistent monitoring
+* **Simplified management** - Let AWS do the heavy lifting via Performance Insights
 
-## New Relic Recommended Performance Schema Settings
+## Primary Recommendation: Let AWS Do the Heavy Lifting
 
-The following configuration optimizes Performance Schema for most workloads monitored by New Relic:
+Our primary recommendation for 2025 is to leverage AWS Performance Insights (PI) as your foundation for monitoring MySQL/Aurora databases. Performance Insights:
 
-### 1. Essential Parameter Group Settings
+- Automatically enables and configures core Performance Schema components
+- Maintains configuration through instance restarts and failovers
+- Provides comprehensive monitoring with minimal overhead
+- Delivers persistent visibility without manual intervention
+
+For a complete guide to implementing this approach, see our [Performance Insights Guide](performance-insights-guide.md).
+
+## Supplemental Performance Schema Configuration
+
+While Performance Insights handles the core configuration, you may want to supplement it with these settings for optimal New Relic integration:
+
+### 1. Supplemental Parameter Group Settings
 
 | Parameter | Recommended Value | Notes |
 |-----------|-------------------|-------|
-| `performance_schema` | `1` (ON) | Master switch for Performance Schema |
-| `performance_schema_consumer_events_statements_current` | `1` (ON) | Required for SQL statement metrics |
-| `performance_schema_consumer_events_statements_history` | `1` (ON) | Recent statement history |
-| `performance_schema_consumer_events_statements_history_long` | `0` (OFF) | High overhead, disable unless needed |
-| `performance_schema_consumer_events_waits_current` | `0` (OFF) | Enable only for deep diagnostics |
-| `performance_schema_consumer_events_waits_history` | `0` (OFF) | High overhead, typically unnecessary |
-| `performance_schema_max_digest_length` | `1024` | Balance between detail and memory usage |
-| `performance_schema_max_sql_text_length` | `4096` | Capture adequate query text without excess |
+| `performance_schema` | `1` (ON) | Usually managed by PI, but ensure it's explicitly enabled |
+| `performance_schema_digests_size` | `10000` | Ensures adequate memory for query digest storage |
+| `performance_schema_max_sql_text_length` | `4096` | Capture full query text for better identification |
+| `performance_schema_events_statements_history_long_size` | `10000` | Sufficient history for New Relic's longer-term analysis |
 
-### 2. Runtime SQL Configuration (Requires Automation)
+### 2. New Relic-Specific Optimizations
 
-These settings must be reapplied after any database restart or failover:
+For workloads requiring specific insights beyond what Performance Insights enables automatically, you can apply these additional SQL configurations. Note that with Performance Insights, these typically only need to be applied for specialized monitoring needs:
 
 ```sql
--- Enable only necessary statement consumers
+-- For MySQL 8.0: Enable specific instruments for New Relic that may not be enabled by PI
+UPDATE performance_schema.setup_instruments
+SET ENABLED = 'YES', TIMED = 'YES' 
+WHERE NAME LIKE 'statement/%';
+
+-- Selectively enable important wait instruments that provide valuable context
+UPDATE performance_schema.setup_instruments
+SET ENABLED = 'YES', TIMED = 'YES'
+WHERE NAME IN (
+  'wait/io/file/innodb/innodb_data_file',
+  'wait/io/file/innodb/innodb_log_file',
+  'wait/lock/table/sql/handler'
+);
+
+-- For specialized monitoring, you may need to enable these consumers
+-- Note: Performance Insights typically manages these automatically
 UPDATE performance_schema.setup_consumers
 SET ENABLED = 'YES'
 WHERE NAME IN (
@@ -51,67 +73,57 @@ WHERE NAME IN (
   'events_statements_history',
   'statements_digest'
 );
-
--- Disable high-overhead consumers
-UPDATE performance_schema.setup_consumers
-SET ENABLED = 'NO'
-WHERE NAME IN (
-  'events_statements_history_long',
-  'events_stages_current',
-  'events_stages_history',
-  'events_stages_history_long',
-  'events_waits_current', 
-  'events_waits_history',
-  'events_waits_history_long'
-);
-
--- Enable only statement instruments with timing
-UPDATE performance_schema.setup_instruments
-SET ENABLED = 'YES', TIMED = 'YES' 
-WHERE NAME LIKE 'statement/%';
-
--- Disable high-volume, low-value instruments
-UPDATE performance_schema.setup_instruments
-SET ENABLED = 'NO', TIMED = 'NO'
-WHERE NAME LIKE 'wait/io/file/%'
-   OR NAME LIKE 'wait/io/table/%'
-   OR NAME LIKE 'wait/lock/metadata/%'
-   OR NAME LIKE 'wait/lock/table/%'
-   OR NAME LIKE 'wait/sync/rwlock/%'
-   OR NAME LIKE 'wait/sync/mutex/%'
-   OR NAME LIKE 'wait/sync/cond/%';
 ```
+
+> **Important**: On MySQL 8.0.40+, lock table monitoring has significantly reduced overhead due to architectural improvements, making it more practical to monitor these events.
 
 ## Implementation Options
 
-AWS RDS/Aurora requires special handling for Performance Schema configuration:
+For modern MySQL monitoring on AWS in 2025, we recommend this approach:
 
-1. **Parameter Groups**: Configure all available parameters via AWS Parameter Groups
-2. **Runtime Configuration**: Implement automation to apply and maintain non-persistent settings
+1. **Primary Layer**: AWS Performance Insights (managed Performance Schema)
+2. **Supplemental Layer**: Parameter Group adjustments for buffer sizes and specialized settings
+3. **Optional Layer**: Targeted SQL configuration for specialized monitoring needs
 
-Our recommended approach is a multi-layered solution:
+Depending on your requirements, you can implement:
 
-1. **Baseline Configuration**: AWS Parameter Groups via Infrastructure as Code
-2. **Runtime Configuration**: Automated solution using Lambda and EventBridge
+**Option A (Recommended): Performance Insights + Parameter Group**
+- Enable Performance Insights for automatic Performance Schema management
+- Apply supplemental Parameter Group settings for optimization
+- Use New Relic's extended Performance Schema metrics
+
+**Option B: Fully Automated Performance Schema Management**
+Only necessary if Performance Insights doesn't meet your needs or isn't available:
+- Complete Parameter Group configuration 
+- Lambda + EventBridge automation for runtime settings
+- Scheduled verification and maintenance
 
 See our companion documents for detailed implementation guidance:
-* [Technical Implementation Guide](implementation-guide.md)
+* [Performance Insights Guide](performance-insights-guide.md) (Recommended Primary Approach)
+* [Technical Implementation Guide](implementation-guide.md) (Supplemental Configuration)
 * [Automation Strategy Comparison](automation-comparison.md)
 * [Infrastructure as Code Examples](../terraform/README.md)
 
 ## Verifying Your Configuration
 
-After implementing Performance Schema optimizations, verify proper configuration:
+### Performance Insights Verification
+
+1. **AWS Console**: Navigate to RDS > Databases > Your Instance > Monitoring > Performance Insights
+2. Verify that the dashboard is showing active data
+3. Check that "Performance Schema" is listed as the data source
+
+### Performance Schema Configuration Verification
+
+For supplemental configurations, verify proper setup:
 
 ```sql
--- Verify consumers are configured correctly
-SELECT NAME, ENABLED FROM performance_schema.setup_consumers
-WHERE NAME LIKE 'events%';
+-- Check the overall Performance Schema state (should be ON)
+-- On MySQL 8.0, this is typically enabled even in default Parameter Groups
+SELECT @@performance_schema;
 
--- Verify instrument configuration
-SELECT COUNT(*) AS enabled_instruments
-FROM performance_schema.setup_instruments
-WHERE ENABLED = 'YES';
+-- Verify key consumers are enabled (typically handled by PI)
+SELECT NAME, ENABLED FROM performance_schema.setup_consumers
+WHERE NAME IN ('events_statements_current', 'events_statements_history', 'statements_digest');
 
 -- Verify statement instruments are enabled
 SELECT COUNT(*) AS enabled_statements

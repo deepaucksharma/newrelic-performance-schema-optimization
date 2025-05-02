@@ -1,13 +1,57 @@
-# Technical Implementation Guide: Performance Schema Automation
+# Technical Implementation Guide: MySQL Monitoring Optimization (2025)
 
 ## Introduction
 
-This technical guide provides detailed implementation instructions for automating Performance Schema configuration on AWS RDS/Aurora to ensure optimal integration with New Relic monitoring. It follows our recommended multi-layered approach:
+This technical guide provides detailed implementation instructions for optimizing MySQL/Aurora monitoring on AWS to ensure optimal integration with New Relic. Our 2025 recommended approach prioritizes:
 
-1. **Parameter Groups**: Configure persistent settings via AWS Parameter Groups
-2. **Runtime Configuration**: Implement Lambda + EventBridge automation for non-persistent settings
+1. **AWS Performance Insights**: Let AWS manage Performance Schema with minimal configuration
+2. **Parameter Groups**: Supplement with persistent settings via AWS Parameter Groups
+3. **Runtime Configuration**: Optional automation for specialized monitoring needs
 
-## Layer 0: Parameter Group Configuration
+> **Primary Recommendation**: For most workloads, AWS Performance Insights should be your foundation, with the other layers applied only as needed for specialized requirements.
+
+## Layer 0: AWS Performance Insights (Primary Recommendation)
+
+### Step 1: Enable Performance Insights
+
+Performance Insights can be enabled on new or existing instances:
+
+```bash
+# Enable Performance Insights on an existing instance
+aws rds modify-db-instance \
+  --db-instance-identifier mydb \
+  --enable-performance-insights \
+  --performance-insights-retention-period 7
+
+# For Aurora cluster instances
+aws rds modify-db-instance \
+  --db-instance-identifier mycluster-instance1 \
+  --enable-performance-insights \
+  --performance-insights-retention-period 7
+```
+
+Performance Insights activation is non-disruptive and doesn't require a database restart.
+
+### Step 2: Verify Performance Insights Status
+
+Check that PI is properly enabled:
+
+```bash
+# Describe the instance to check Performance Insights status
+aws rds describe-db-instances \
+  --db-instance-identifier mydb \
+  --query 'DBInstances[*].PerformanceInsightsEnabled'
+```
+
+### Step 3: Configure New Relic Integration
+
+No special configuration is needed beyond standard MySQL integration. However, ensure your monitoring user has adequate permissions:
+
+```sql
+GRANT SELECT ON performance_schema.* TO 'newrelic'@'%';
+```
+
+## Layer 1: Supplemental Parameter Group Configuration
 
 ### Step 1: Identify Available Parameters
 
@@ -21,13 +65,15 @@ aws rds describe-db-parameters \
   --query 'Parameters[?ParameterName.contains(@, `performance_schema`)]'
 ```
 
-### Step 2: Create Optimized Parameter Group
+### Step 2: Create Supplemental Parameter Group
 
-Create a custom parameter group with optimized settings:
+Create a custom parameter group with settings to complement Performance Insights:
 
-- Set `performance_schema = 1` (ON)
-- Configure exposed `performance_schema_consumer_*` parameters based on recommendations
-- Set memory/sizing parameters appropriately for your instance size
+- Set or confirm `performance_schema = 1` (ON) - may already be ON in MySQL 8.0
+- Configure buffer sizes for optimal monitoring:
+  - `performance_schema_digests_size = 10000`
+  - `performance_schema_max_sql_text_length = 4096`
+  - `performance_schema_events_statements_history_long_size = 10000`
 
 See the Infrastructure as Code examples for implementation details.
 
@@ -47,11 +93,23 @@ aws rds modify-db-cluster \
   --db-cluster-parameter-group-name perf-schema-cluster-optimized
 ```
 
-Most parameter changes require a database restart to take effect.
+Applying Parameter Group changes typically requires an instance reboot or scheduled maintenance.
 
-## Layer 1: Runtime Configuration Automation
+## Layer 2: Runtime Configuration Automation (Optional)
 
-### Step 1: Set Up VPC Configuration
+> **Note**: With Performance Insights enabled (Layer 0), this layer is optional and only necessary for specialized monitoring requirements that PI doesn't address automatically.
+
+### Step 1: Determine if Runtime Configuration is Needed
+
+Performance Insights automatically manages core Performance Schema settings. You only need runtime configuration automation if:
+
+1. You're using instance types where Performance Insights isn't available
+2. You need to enable specific instruments or consumers not activated by PI
+3. You have specialized monitoring requirements beyond standard PI configuration
+
+If you determine runtime configuration is necessary, proceed with VPC setup:
+
+### Step 2: Set Up VPC Configuration
 
 Ensure your Lambda function can access your RDS/Aurora database:
 
@@ -187,7 +245,8 @@ Create CloudWatch metric filters and alarms:
 ### Verify Parameter Group Settings
 
 ```sql
-SHOW GLOBAL VARIABLES LIKE 'performance_schema%';
+-- For MySQL 8.0, use targeted query to avoid hundreds of rows
+SHOW VARIABLES WHERE Variable_name = 'performance_schema';
 ```
 
 ### Verify Runtime Settings

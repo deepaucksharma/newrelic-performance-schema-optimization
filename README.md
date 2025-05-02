@@ -1,10 +1,11 @@
-# New Relic Performance Schema Optimization for MySQL/Aurora
+# New Relic MySQL Monitoring Optimization for AWS (2025)
 
-This repository contains comprehensive resources for optimizing MySQL/Aurora Performance Schema (P_S) on AWS RDS and Aurora to ensure efficient monitoring with New Relic while minimizing system overhead and data costs.
+This repository contains comprehensive resources for optimizing MySQL/Aurora monitoring on AWS RDS and Aurora to ensure efficient integration with New Relic while minimizing system overhead and data costs. Our primary recommendation for 2025 is to leverage AWS Performance Insights as your foundation, supplemented by targeted Performance Schema configurations where needed.
 
 ## Repository Structure
 
 - **docs/**: Documentation and guides
+  - `performance-insights-guide.md`: Primary recommended approach using AWS PI
   - `customer-guide.md`: End-user friendly documentation
   - `implementation-guide.md`: Technical implementation instructions
   - `automation-comparison.md`: Analysis of implementation approaches
@@ -28,17 +29,18 @@ This repository contains comprehensive resources for optimizing MySQL/Aurora Per
 ## Key Benefits
 
 * **Reduced costs**: Lower New Relic data ingest volume (typically 40-70% savings)
-* **Improved performance**: Minimal overhead on production databases
+* **Improved performance**: Typically adds only 2-8% CPU overhead on MySQL 8.0.38+
 * **Focused monitoring**: Capture only metrics that drive actionable insights
 * **Consistent visibility**: Automated configuration ensures persistent monitoring
 * **Compliance**: Auditable, consistent monitoring configuration across environments
 
 ## Implementation Approach
 
-This solution uses a multi-layered approach:
+Our 2025 recommended approach uses a tiered strategy that prioritizes AWS-managed solutions:
 
-1. **Parameter Groups (Layer 0)**: Configure persistent settings via AWS Parameter Groups
-2. **Lambda + EventBridge (Layer 1)**: Implement serverless automation for non-persistent settings that:
+1. **Performance Insights (Primary Layer)**: Let AWS do the heavy lifting by enabling Performance Insights to automatically manage Performance Schema
+2. **Parameter Groups (Supplemental Layer)**: Configure buffer sizes and other persistent settings via AWS Parameter Groups
+3. **Lambda + EventBridge (Optional Layer)**: Implement serverless automation only for specialized requirements not addressed by Performance Insights:
    - Responds to database restart/failover events
    - Performs scheduled verification
    - Detects and corrects configuration drift
@@ -46,7 +48,7 @@ This solution uses a multi-layered approach:
 
 ## Getting Started
 
-Please refer to the [Implementation Guide](docs/implementation-guide.md) for detailed instructions on deploying this solution.
+For most MySQL on AWS workloads, start with our [Performance Insights Guide](docs/performance-insights-guide.md) to implement the primary recommended approach. For specialized requirements, refer to the [Implementation Guide](docs/implementation-guide.md) for detailed instructions on supplemental configurations.
 
 ## Support
 

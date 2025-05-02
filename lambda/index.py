@@ -21,7 +21,10 @@ DB_PROXY_ENDPOINT = os.environ.get('DB_PROXY_ENDPOINT', '')
 DB_HOST = os.environ.get('DB_HOST', '')
 SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN', '')
 PERFORMANCE_SCHEMA_HASH = os.environ.get('PERFORMANCE_SCHEMA_HASH', '')
+# SQL statements can come directly from environment variable or from S3
 SQL_UPDATE_STATEMENTS = os.environ.get('SQL_UPDATE_STATEMENTS', '')
+SQL_S3_BUCKET = os.environ.get('SQL_S3_BUCKET', '')
+SQL_S3_KEY = os.environ.get('SQL_S3_KEY', '')
 
 # AWS region and current identity
 session = boto3.session.Session()
@@ -106,7 +109,7 @@ def connect_to_database(retry_attempts=3, retry_delay=2):
                 password=password,
                 port=port,
                 connect_timeout=10,
-                ssl={'ssl': True}
+                ssl={'ca': '/opt/python/rds-combined-ca-bundle.pem'}
             )
             logger.info("Database connection successful")
             return conn
@@ -168,12 +171,36 @@ def get_current_perf_schema_hash(conn):
         logger.error(f"Error getting Performance Schema hash: {e}")
         raise
 
+def get_sql_statements():
+    """Get SQL statements from environment variable or S3"""
+    if SQL_UPDATE_STATEMENTS:
+        logger.info("Using SQL statements from environment variable")
+        return SQL_UPDATE_STATEMENTS
+    
+    if SQL_S3_BUCKET and SQL_S3_KEY:
+        logger.info(f"Retrieving SQL statements from S3 bucket: {SQL_S3_BUCKET}, key: {SQL_S3_KEY}")
+        try:
+            s3 = boto3.client('s3')
+            response = s3.get_object(Bucket=SQL_S3_BUCKET, Key=SQL_S3_KEY)
+            sql_content = response['Body'].read().decode('utf-8')
+            logger.info("Successfully retrieved SQL statements from S3")
+            return sql_content
+        except Exception as e:
+            logger.error(f"Error retrieving SQL from S3: {e}")
+            raise
+    
+    logger.error("No SQL statements available - neither environment variable nor S3 location provided")
+    raise ValueError("No SQL statements available")
+
 def apply_perf_schema_configuration(conn):
     """Apply the Performance Schema configuration SQL statements"""
     try:
+        # Get SQL statements from environment variable or S3
+        sql_content = get_sql_statements()
+        
         with conn.cursor() as cursor:
             # Split and execute each SQL statement
-            statements = SQL_UPDATE_STATEMENTS.split(';')
+            statements = sql_content.split(';')
             
             # Start transaction
             conn.begin()

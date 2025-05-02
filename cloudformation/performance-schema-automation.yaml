@@ -79,10 +79,10 @@ Resources:
       Family: !Ref ParameterGroupFamily
       Parameters:
         performance_schema: 1
-        performance_schema_consumer_events_statements_current: 1
-        performance_schema_consumer_events_statements_history: 1
-        performance_schema_consumer_events_statements_history_long: 0
-        performance_schema_consumer_events_waits_current: 0
+        performance-schema-consumer-events-statements-current: 1
+        performance-schema-consumer-events-statements-history: 1
+        performance-schema-consumer-events-statements-history-long: 0
+        performance-schema-consumer-events-waits-current: 0
         performance_schema_max_digest_length: 1024
         performance_schema_max_sql_text_length: 4096
       Tags:
@@ -266,7 +266,10 @@ Resources:
                 - UseIamAuthentication
                 - Effect: Allow
                   Action: rds-db:connect
-                  Resource: !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/*'
+                  Resource: !If 
+                    - IsAuroraCluster
+                    - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:cluster-*/*'
+                    - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:dbi-*/*'
                 - !Ref AWS::NoValue
               - !If
                 - UseIamAuthentication
@@ -287,6 +290,21 @@ Resources:
           Value: 'New Relic MySQL Monitoring'
 
   # Lambda Function
+  # Lambda Layer for PyMySQL
+  PyMySQLLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub '${Prefix}-pymysql-layer'
+      Description: 'PyMySQL library for RDS connectivity'
+      CompatibleRuntimes:
+        - python3.9
+      Content:
+        # IMPORTANT: Before deployment, create a ZIP file containing the PyMySQL library:
+        # mkdir -p python && pip install pymysql -t python && zip -r pymysql-layer.zip python
+        # Then upload to S3 and reference it here
+        S3Bucket: 'REPLACE_WITH_YOUR_S3_BUCKET'
+        S3Key: 'REPLACE_WITH_S3_KEY_TO_PYMYSQL_LAYER_ZIP'
+
   PerformanceSchemaLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -297,7 +315,14 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Timeout: 30
       MemorySize: 128
+      Layers:
+        - !Ref PyMySQLLayer
       Code:
+        # IMPORTANT: This inline code is for reference only. For actual deployment:
+        # 1. Create a deployment package with PyMySQL:
+        #    pip install pymysql -t lambda-build && cd lambda-build && zip -r ../lambda.zip .
+        # 2. Upload to S3 and reference it here with S3Key and S3Bucket properties
+        # 3. Or create a Lambda Layer with PyMySQL and reference it in Layers
         ZipFile: |
           import json
           import boto3
@@ -407,7 +432,7 @@ Resources:
                           password=password,
                           port=port,
                           connect_timeout=10,
-                          ssl={'ssl': True}
+                          ssl={'ca': '/opt/python/rds-combined-ca-bundle.pem'}
                       )
                       logger.info("Database connection successful")
                       return conn
@@ -618,6 +643,10 @@ Resources:
           DB_HOST: !Ref DatabaseHost
           SNS_TOPIC_ARN: !If [CreateSNSTopic, !Ref NotificationTopic, '']
           PERFORMANCE_SCHEMA_HASH: '46b5fa75e2ee862b8903e17b8fc9a5ee22e9812fa86af68cc37c3e659ecfe0fd'
+          # IMPORTANT: For production, store SQL in S3 to avoid 4KB env var limit
+          # SQL_S3_BUCKET: 'your-bucket-name'
+          # SQL_S3_KEY: 'path/to/sql-statements.sql'
+          # The inline SQL below is for demonstration and should be moved to S3 for production
           SQL_UPDATE_STATEMENTS: |
             -- Enable statement consumers
             UPDATE performance_schema.setup_consumers
@@ -683,7 +712,7 @@ Resources:
         - Key: Service
           Value: 'New Relic MySQL Monitoring'
 
-  # EventBridge Rule - RDS Events
+  # EventBridge Rule - RDS Instance Events
   EventsRule:
     Type: AWS::Events::Rule
     Properties:
@@ -694,7 +723,6 @@ Resources:
           - aws.rds
         detail-type:
           - RDS DB Instance Event
-          - RDS DB Cluster Event
         detail:
           EventID:
             - RDS-EVENT-0004  # DB instance restarted
@@ -703,10 +731,47 @@ Resources:
             - RDS-EVENT-0071  # DB instance point-in-time restore completed
             - RDS-EVENT-0025  # DB instance recovery completed
             - RDS-EVENT-0006  # DB instance reboot completed
+            - RDS-EVENT-0221  # Storage autoscaling initiated
+            - RDS-EVENT-0225  # Storage autoscaling completed
       State: ENABLED
       Targets:
         - Id: PerformanceSchemaLambda
           Arn: !GetAtt PerformanceSchemaLambda.Arn
+          
+  # EventBridge Rule - Aurora Cluster Events
+  AuroraClusterEventsRule:
+    Type: AWS::Events::Rule
+    Condition: IsAuroraCluster
+    Properties:
+      Name: !Sub '${Prefix}-perf-schema-aurora-cluster-events'
+      Description: 'Detect Aurora cluster events that require Performance Schema reconfiguration'
+      EventPattern:
+        source:
+          - aws.rds
+        detail-type:
+          - RDS DB Cluster Event
+        detail:
+          EventID:
+            - RDS-EVENT-0069  # Cluster failover completed
+            - RDS-EVENT-0070  # Cluster failover initiated 
+            - RDS-EVENT-0071  # Cluster restore completed
+            - RDS-EVENT-0091  # Writer instance changed
+            - RDS-EVENT-0141  # Cluster topology changed
+            - RDS-EVENT-0173  # Cluster maintenance complete
+      State: ENABLED
+      Targets:
+        - Id: PerformanceSchemaLambda
+          Arn: !GetAtt PerformanceSchemaLambda.Arn
+          
+  # Lambda Permission for EventBridge (Aurora Cluster Events Rule)
+  AuroraEventsRulePermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsAuroraCluster
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PerformanceSchemaLambda
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AuroraClusterEventsRule.Arn
       Tags:
         - Key: Name
           Value: !Sub '${Prefix}-perf-schema-events-rule'

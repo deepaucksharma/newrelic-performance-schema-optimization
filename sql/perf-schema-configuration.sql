@@ -1,6 +1,9 @@
--- New Relic Optimized Performance Schema Configuration for MySQL/Aurora
--- These scripts configure Performance Schema for optimal balance between 
--- monitoring visibility and performance overhead.
+-- New Relic Optimized Performance Schema Configuration for MySQL/Aurora (2025)
+-- These scripts provide supplemental Performance Schema configurations
+-- to complement AWS Performance Insights for optimal monitoring with New Relic.
+--
+-- PRIMARY RECOMMENDATION: Use AWS Performance Insights as your foundation,
+-- and apply these configurations only as needed for specialized requirements.
 
 -- =====================================================================
 -- 1. Database User Creation (Run as admin user)
@@ -19,10 +22,18 @@ FLUSH PRIVILEGES;
 -- FLUSH PRIVILEGES;
 
 -- =====================================================================
--- 2. Performance Schema Configuration (Applied via automation)
+-- 2. Performance Schema Configuration (Supplemental to Performance Insights)
 -- =====================================================================
 
--- Enable Required Consumers
+-- NOTE: With Performance Insights enabled, many of these settings
+-- are automatically managed. This script provides supplemental configurations
+-- for specialized monitoring needs beyond what PI enables by default.
+
+-- MySQL 8.0 Note: On MySQL 8.0, Performance Schema itself is typically ON
+-- in default parameter groups, but most consumers are disabled until
+-- explicitly enabled or managed by Performance Insights.
+
+-- Additional Consumers for New Relic (if not enabled by PI)
 UPDATE performance_schema.setup_consumers
 SET ENABLED = 'YES'
 WHERE NAME IN (
@@ -33,48 +44,29 @@ WHERE NAME IN (
   'thread_instrumentation'
 );
 
--- Disable High-Overhead Consumers
-UPDATE performance_schema.setup_consumers
-SET ENABLED = 'NO'
-WHERE NAME IN (
-  'events_statements_history_long',
-  'events_stages_current',
-  'events_stages_history',
-  'events_stages_history_long',
-  'events_waits_current', 
-  'events_waits_history',
-  'events_waits_history_long',
-  'events_transactions_current',
-  'events_transactions_history',
-  'events_transactions_history_long'
-);
-
--- Enable SQL Statement Tracking
+-- Ensure Statement Instruments are Enabled
 UPDATE performance_schema.setup_instruments
 SET ENABLED = 'YES', TIMED = 'YES' 
 WHERE NAME LIKE 'statement/%';
 
--- Disable High-Volume, Low-Value Instruments
+-- Selectively Enable Valuable Wait Instruments 
+-- MySQL 8.0.40+ has significantly improved lock table monitoring efficiency
+UPDATE performance_schema.setup_instruments
+SET ENABLED = 'YES', TIMED = 'YES' 
+WHERE NAME IN (
+  'wait/io/file/innodb/innodb_data_file',
+  'wait/io/file/innodb/innodb_log_file',
+  'wait/io/file/sql/binlog',
+  'wait/lock/table/sql/handler'
+);
+
+-- Optional: Disable High-Volume, Low-Value Instruments
+-- Consider enabling only specific instruments based on monitoring needs
 UPDATE performance_schema.setup_instruments
 SET ENABLED = 'NO', TIMED = 'NO'
-WHERE NAME LIKE 'wait/io/file/%'
-   OR NAME LIKE 'wait/io/table/%'
-   OR NAME LIKE 'wait/lock/metadata/%'
-   OR NAME LIKE 'wait/lock/table/%'
-   OR NAME LIKE 'wait/sync/rwlock/%'
+WHERE NAME LIKE 'wait/sync/rwlock/%'
    OR NAME LIKE 'wait/sync/mutex/%'
    OR NAME LIKE 'wait/sync/cond/%';
-
--- Selectively Enable Critical Wait Instruments for Diagnostics
--- Uncomment only if specifically needed for troubleshooting
--- UPDATE performance_schema.setup_instruments
--- SET ENABLED = 'YES', TIMED = 'YES' 
--- WHERE NAME IN (
---   'wait/io/file/innodb/innodb_data_file',
---   'wait/io/file/innodb/innodb_log_file',
---   'wait/io/file/sql/binlog',
---   'wait/lock/table/sql/handler'
--- );
 
 -- =====================================================================
 -- 3. Verification Queries (For manual checks)

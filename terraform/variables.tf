@@ -29,6 +29,11 @@ variable "db_instance_identifier" {
   description = "RDS DB instance identifier"
   type        = string
   default     = ""
+  
+  validation {
+    condition     = var.is_aurora == false ? length(var.db_instance_identifier) > 0 : true
+    error_message = "db_instance_identifier must be provided when is_aurora is false."
+  }
 }
 
 variable "db_instance_resource_id" {
@@ -41,6 +46,11 @@ variable "db_cluster_identifier" {
   description = "Aurora DB cluster identifier"
   type        = string
   default     = ""
+  
+  validation {
+    condition     = var.is_aurora == true ? length(var.db_cluster_identifier) > 0 : true
+    error_message = "db_cluster_identifier must be provided when is_aurora is true."
+  }
 }
 
 variable "db_cluster_resource_id" {
@@ -99,12 +109,30 @@ variable "max_sql_text_length" {
 }
 
 variable "performance_schema_hash" {
-  description = "Expected hash value of properly configured Performance Schema setup"
+  description = "Expected hash value of properly configured Performance Schema setup (optional for first run)"
   type        = string
+  default     = ""
+}
+
+variable "sql_s3_bucket" {
+  description = "S3 bucket containing SQL statements (alternative to inline sql_update_statements)"
+  type        = string
+  default     = ""
+}
+
+variable "sql_s3_key" {
+  description = "S3 key for SQL statements file"
+  type        = string
+  default     = ""
+  
+  validation {
+    condition     = (length(var.sql_s3_bucket) > 0 && length(var.sql_s3_key) > 0) || (length(var.sql_s3_bucket) == 0 && length(var.sql_s3_key) == 0)
+    error_message = "Both sql_s3_bucket and sql_s3_key must be provided together or both left empty."
+  }
 }
 
 variable "sql_update_statements" {
-  description = "SQL statements to apply for Performance Schema configuration"
+  description = "SQL statements to apply for Performance Schema configuration (will be ignored if S3 options are provided)"
   type        = string
   default     = <<-EOT
 -- Enable statement consumers
