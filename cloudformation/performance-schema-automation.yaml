@@ -78,11 +78,14 @@ Resources:
       Description: 'Optimized Performance Schema settings for New Relic monitoring'
       Family: !Ref ParameterGroupFamily
       Parameters:
+        # Master switch - must use underscore format
         performance_schema: 1
+        # Consumer parameters - must use dash format for these specific parameters
         performance-schema-consumer-events-statements-current: 1
         performance-schema-consumer-events-statements-history: 1
         performance-schema-consumer-events-statements-history-long: 0
         performance-schema-consumer-events-waits-current: 0
+        # Memory/sizing parameters - must use underscore format
         performance_schema_max_digest_length: 1024
         performance_schema_max_sql_text_length: 4096
       Tags:
@@ -262,27 +265,57 @@ Resources:
                   - ec2:DescribeNetworkInterfaces
                   - ec2:DeleteNetworkInterface
                 Resource: '*'
-              - !If
-                - UseIamAuthentication
-                - Effect: Allow
-                  Action: rds-db:connect
-                  Resource: !If 
-                    - IsAuroraCluster
-                    - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:cluster-*/*'
-                    - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:dbi-*/*'
-                - !Ref AWS::NoValue
-              - !If
-                - UseIamAuthentication
-                - !Ref AWS::NoValue
-                - Effect: Allow
-                  Action: secretsmanager:GetSecretValue
-                  Resource: !Ref DatabaseSecretArn
-              - !If
-                - CreateSNSTopic
-                - Effect: Allow
-                  Action: sns:Publish
-                  Resource: !Ref NotificationTopic
-                - !Ref AWS::NoValue
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: '*'
+                
+  # IAM policy for RDS IAM Authentication - Only created when IAM auth is used
+  IAMAuthPolicy:
+    Type: AWS::IAM::Policy
+    Condition: UseIamAuthentication
+    Properties:
+      PolicyName: !Sub '${Prefix}-perf-schema-iam-auth-policy'
+      Roles:
+        - !Ref LambdaExecutionRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: rds-db:connect
+            Resource: !If 
+              - IsAuroraCluster
+              - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:cluster-*/*'
+              - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:dbi-*/*'
+                
+  # IAM policy for Secrets Manager - Only created when NOT using IAM auth
+  SecretsManagerPolicy:
+    Type: AWS::IAM::Policy
+    Condition: UseIamAuthentication
+    Properties:
+      PolicyName: !Sub '${Prefix}-perf-schema-secrets-policy'
+      Roles:
+        - !Ref LambdaExecutionRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: !Ref DatabaseSecretArn
+                
+  # IAM policy for SNS Notifications - Only created when notification topic exists
+  SNSPublishPolicy:
+    Type: AWS::IAM::Policy
+    Condition: CreateSNSTopic
+    Properties:
+      PolicyName: !Sub '${Prefix}-perf-schema-sns-policy'
+      Roles:
+        - !Ref LambdaExecutionRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref NotificationTopic
       Tags:
         - Key: Name
           Value: !Sub '${Prefix}-perf-schema-lambda-role'
@@ -290,18 +323,18 @@ Resources:
           Value: 'New Relic MySQL Monitoring'
 
   # Lambda Function
-  # Lambda Layer for PyMySQL
+  # Lambda Layer for PyMySQL - IMPORTANT: PREPARE THIS BEFORE DEPLOYMENT
   PyMySQLLayer:
     Type: AWS::Lambda::LayerVersion
     Properties:
       LayerName: !Sub '${Prefix}-pymysql-layer'
       Description: 'PyMySQL library for RDS connectivity'
       CompatibleRuntimes:
-        - python3.9
+        - python3.12  # Updated to current recommended runtime
       Content:
-        # IMPORTANT: Before deployment, create a ZIP file containing the PyMySQL library:
+        # CRITICAL: Before deployment, run these commands to prepare the layer:
         # mkdir -p python && pip install pymysql -t python && zip -r pymysql-layer.zip python
-        # Then upload to S3 and reference it here
+        # aws s3 cp pymysql-layer.zip s3://YOUR-BUCKET-NAME/layers/
         S3Bucket: 'REPLACE_WITH_YOUR_S3_BUCKET'
         S3Key: 'REPLACE_WITH_S3_KEY_TO_PYMYSQL_LAYER_ZIP'
 
@@ -310,19 +343,22 @@ Resources:
     Properties:
       FunctionName: !Sub '${Prefix}-perf-schema-configurator'
       Description: 'Configures Performance Schema for New Relic monitoring'
-      Runtime: python3.9
+      Runtime: python3.12  # Updated to current recommended runtime
       Handler: index.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Timeout: 30
       MemorySize: 128
       Layers:
         - !Ref PyMySQLLayer
+      # RECOMMENDED: Use S3 deployment instead of inline code for production use
+      # Code:
+      #   S3Bucket: 'REPLACE_WITH_YOUR_S3_BUCKET'
+      #   S3Key: 'REPLACE_WITH_YOUR_S3_KEY_TO_LAMBDA_ZIP'
       Code:
-        # IMPORTANT: This inline code is for reference only. For actual deployment:
-        # 1. Create a deployment package with PyMySQL:
-        #    pip install pymysql -t lambda-build && cd lambda-build && zip -r ../lambda.zip .
-        # 2. Upload to S3 and reference it here with S3Key and S3Bucket properties
-        # 3. Or create a Lambda Layer with PyMySQL and reference it in Layers
+        # NOTE: This inline code is for DEMONSTRATION only.
+        # For production deployments, package the Lambda with dependencies and upload to S3.
+        # Run: pip install pymysql -t lambda-package && cp lambda/index.py lambda-package/ && cd lambda-package && zip -r ../lambda.zip .
+        # Then use the S3 deployment method above instead of inline code.
         ZipFile: |
           import json
           import boto3

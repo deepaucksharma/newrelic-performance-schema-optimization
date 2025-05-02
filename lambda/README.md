@@ -1,68 +1,90 @@
-# Performance Schema Lambda Function
+# Lambda Function for Performance Schema Management
 
-This directory contains the Lambda function code for the Performance Schema automation solution. The actual Lambda function implementation is included in the CloudFormation template and Terraform module for direct deployment, but this directory provides the standalone version for reference and testing.
+This directory contains the AWS Lambda function that monitors and enforces Performance Schema configuration on RDS/Aurora MySQL instances.
 
-## Usage
+## Components
 
-The Lambda function in this directory can be used for:
-1. Manual testing and debugging
-2. Custom deployment scenarios
-3. Reference implementation
+- `index.py` - Core function code
+- `requirements.txt` - Python dependencies
+- `build.sh` - Build script to create deployment packages
 
-## Implementation
+## How It Works
 
-See the `index.py` file for the complete Python implementation. The function performs the following:
+The Lambda function:
 
-1. Connects to the MySQL/Aurora database using IAM or password authentication
-2. Verifies the current Performance Schema configuration
-3. Detects configuration drift from the expected state
-4. Applies the optimized configuration when drift is detected
-5. Validates the changes were applied correctly
-6. Sends notifications to SNS (if configured)
+1. Retrieves the desired configuration from the S3 bucket (defined in `target-config.yaml`)
+2. Connects to the database using IAM Authentication or Secret Manager
+3. Queries the current Performance Schema state
+4. Computes the difference between current and desired state
+5. Applies the minimal set of UPDATE statements to match the desired state
+6. Logs the results with structured metadata for monitoring
 
-## Dependencies
+## Building and Deployment
 
-The function requires:
-- Python 3.9+
-- PyMySQL
-- AWS SDK for Python (boto3)
+To build the Lambda package:
+
+```bash
+# Run the build script
+./build.sh
+
+# This creates:
+# - lambda.zip - Main function code
+# - pymysql-pyyaml-layer.zip - Dependencies layer
+```
 
 ## Environment Variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| DB_IDENTIFIER | RDS instance or Aurora cluster ID | "mydb" |
-| DB_SECRET_ARN | ARN of Secrets Manager secret | "arn:aws:secretsmanager:..." |
-| DB_USER | Database username | "lambda_perf_schema" |
-| DB_USE_IAM_AUTH | Use IAM authentication | "true" or "false" |
-| DB_IS_AURORA | Is Aurora database | "true" or "false" |
-| DB_PROXY_ENDPOINT | RDS Proxy endpoint | "myproxy.proxy-abcdefg.region.rds.amazonaws.com" |
-| DB_HOST | Database host | "mydb.abcdefg.region.rds.amazonaws.com" |
-| SNS_TOPIC_ARN | ARN of SNS topic for notifications | "arn:aws:sns:..." |
-| PERFORMANCE_SCHEMA_HASH | Expected hash of configuration | "46b5fa75e2ee..." |
-| SQL_UPDATE_STATEMENTS | SQL statements to apply | "UPDATE performance_schema..." |
+The Lambda function expects the following environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `SQL_BUCKET` | S3 bucket containing the YAML configuration |
+| `SQL_KEY` | S3 key (path) to the YAML configuration file |
+| `DB_ID` | RDS instance ID or Aurora cluster ID |
+| `IS_AURORA` | "true" for Aurora clusters, "false" for RDS instances |
+| `IAM_AUTH` | "true" to use IAM auth, "false" for Secrets Manager |
+| `DB_USER` | Database username (default: lambda_perf_schema) |
+| `NR_ACCOUNT` | (Optional) New Relic account ID for logging |
+| `SECRET_ARN` | (Optional) Secrets Manager ARN for DB credentials |
+
+## Customization
+
+To customize the function behavior:
+
+1. Modify the `_diff()` function for different change logic
+2. Add additional validation or error handling as needed
+3. Extend structured logging for integration with other monitoring systems
 
 ## Testing
 
-To test this function locally before deployment:
+During development, you can test the function locally:
 
-1. Set up a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install pymysql boto3
-   ```
+```python
+# Set environment variables
+import os
+os.environ['SQL_BUCKET'] = 'my-bucket'
+os.environ['SQL_KEY'] = 'target-config.yaml'
+os.environ['DB_ID'] = 'my-db'
+os.environ['IS_AURORA'] = 'false'
+os.environ['IAM_AUTH'] = 'true'
 
-2. Create a test event file (test_event.json):
-   ```json
-   {
-     "source": "manual.test",
-     "detail-type": "Manual Invocation"
-   }
-   ```
+# Execute the handler with a test event
+import index
+event = {'source': 'aws.events', 'detail-type': 'Scheduled Event'}
+index.lambda_handler(event, None)
+```
 
-3. Test with AWS SAM Local or directly with the AWS CLI Lambda invoke command.
+## Monitoring and Troubleshooting
 
----
+The function emits structured JSON logs with the following fields:
 
-© New Relic, Inc. | Internal use and authorized customers only
+- `database`: The target database identifier
+- `drift_detected`: Whether configuration drift was found
+- `patch_applied`: Whether changes were successfully applied
+- `update_count`: Number of SQL statements executed
+- `verification_success`: Whether post-update verification passed
+- `error`: Error details if any occurred
+- `nr_account`: New Relic account ID if provided
+- `source`: Fixed identifier for log filtering
+
+Check CloudWatch Logs for function execution details.

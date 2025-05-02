@@ -1,184 +1,94 @@
-###############################################
-# variables.tf - Performance Schema Automation
-###############################################
-
 variable "prefix" {
-  description = "Prefix for resource names"
+  description = "Prefix for all created resources"
   type        = string
-  default     = "newrelic"
+  default     = "nr-mysql-ps"
 }
 
-variable "parameter_family" {
-  description = "DB parameter group family (e.g., mysql8.0, aurora-mysql8.0)"
+variable "engine_family" {
+  description = "MySQL/Aurora engine family"
   type        = string
+  default     = "mysql8.0"
+  validation {
+    condition     = contains(["mysql8.0", "mysql5.7", "aurora-mysql8.0", "aurora-mysql5.7"], var.engine_family)
+    error_message = "Engine family must be one of: mysql8.0, mysql5.7, aurora-mysql8.0, aurora-mysql5.7"
+  }
 }
 
-variable "cluster_parameter_family" {
-  description = "DB cluster parameter group family for Aurora"
+variable "database_id" {
+  description = "RDS Instance ID or Aurora Cluster ID"
   type        = string
-  default     = ""
 }
 
 variable "is_aurora" {
-  description = "Whether the database is an Aurora cluster"
+  description = "Whether target is Aurora cluster (true) or RDS instance (false)"
   type        = bool
   default     = false
 }
 
-variable "db_instance_identifier" {
-  description = "RDS DB instance identifier"
-  type        = string
-  default     = ""
-  
-  validation {
-    condition     = var.is_aurora == false ? length(var.db_instance_identifier) > 0 : true
-    error_message = "db_instance_identifier must be provided when is_aurora is false."
-  }
-}
-
-variable "db_instance_resource_id" {
-  description = "RDS DB instance resource ID for IAM authentication"
-  type        = string
-  default     = ""
-}
-
-variable "db_cluster_identifier" {
-  description = "Aurora DB cluster identifier"
-  type        = string
-  default     = ""
-  
-  validation {
-    condition     = var.is_aurora == true ? length(var.db_cluster_identifier) > 0 : true
-    error_message = "db_cluster_identifier must be provided when is_aurora is true."
-  }
-}
-
-variable "db_cluster_resource_id" {
-  description = "Aurora DB cluster resource ID for IAM authentication"
-  type        = string
-  default     = ""
-}
-
-variable "db_host" {
-  description = "Database hostname or endpoint"
+variable "sql_bucket" {
+  description = "S3 bucket for YAML configuration and Lambda code"
   type        = string
 }
 
-variable "db_secret_arn" {
-  description = "ARN of the Secrets Manager secret containing database credentials"
+variable "sql_key" {
+  description = "S3 key for YAML configuration file"
   type        = string
+  default     = "target-config.yaml"
 }
 
-variable "db_security_group_id" {
-  description = "Security group ID of the database"
+variable "lambda_code_key" {
+  description = "S3 key for Lambda code zip file"
   type        = string
+  default     = "lambda.zip"
+}
+
+variable "lambda_layer_key" {
+  description = "S3 key for Lambda layer zip file"
+  type        = string
+  default     = "pymysql-pyyaml-layer.zip"
 }
 
 variable "vpc_id" {
-  description = "VPC ID where resources will be created"
+  description = "VPC where Lambda will run (must have access to RDS/Aurora)"
   type        = string
 }
 
 variable "subnet_ids" {
-  description = "List of subnet IDs for Lambda and RDS Proxy"
+  description = "Subnets where Lambda will run (must have access to RDS/Aurora)"
   type        = list(string)
 }
 
-variable "create_proxy" {
-  description = "Whether to create an RDS Proxy"
-  type        = bool
-  default     = true
+variable "db_secret_arn" {
+  description = "Optional SecretManager ARN for database credentials (if not using IAM auth)"
+  type        = string
+  default     = ""
 }
 
 variable "use_iam_auth" {
-  description = "Whether to use IAM authentication for database access"
+  description = "Use IAM authentication for database connection"
   type        = bool
   default     = true
 }
 
-variable "max_digest_length" {
-  description = "Value for performance_schema_max_digest_length parameter"
+variable "db_user" {
+  description = "Database user for Lambda connection"
   type        = string
-  default     = "1024"
+  default     = "lambda_perf_schema"
 }
 
-variable "max_sql_text_length" {
-  description = "Value for performance_schema_max_sql_text_length parameter"
-  type        = string
-  default     = "4096"
-}
-
-variable "performance_schema_hash" {
-  description = "Expected hash value of properly configured Performance Schema setup (optional for first run)"
+variable "new_relic_account_id" {
+  description = "Optional: New Relic account ID for logging"
   type        = string
   default     = ""
 }
 
-variable "sql_s3_bucket" {
-  description = "S3 bucket containing SQL statements (alternative to inline sql_update_statements)"
-  type        = string
-  default     = ""
-}
-
-variable "sql_s3_key" {
-  description = "S3 key for SQL statements file"
-  type        = string
-  default     = ""
-  
-  validation {
-    condition     = (length(var.sql_s3_bucket) > 0 && length(var.sql_s3_key) > 0) || (length(var.sql_s3_bucket) == 0 && length(var.sql_s3_key) == 0)
-    error_message = "Both sql_s3_bucket and sql_s3_key must be provided together or both left empty."
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {
+    ManagedBy = "terraform"
+    Component = "new-relic-perf-schema"
   }
-}
-
-variable "sql_update_statements" {
-  description = "SQL statements to apply for Performance Schema configuration (will be ignored if S3 options are provided)"
-  type        = string
-  default     = <<-EOT
--- Enable statement consumers
-UPDATE performance_schema.setup_consumers
-SET ENABLED = 'YES'
-WHERE NAME IN (
-  'events_statements_current',
-  'events_statements_history',
-  'statements_digest'
-);
-
--- Disable high-overhead consumers
-UPDATE performance_schema.setup_consumers
-SET ENABLED = 'NO'
-WHERE NAME IN (
-  'events_statements_history_long',
-  'events_stages_current',
-  'events_stages_history',
-  'events_stages_history_long',
-  'events_waits_current', 
-  'events_waits_history',
-  'events_waits_history_long'
-);
-
--- Enable statement instruments
-UPDATE performance_schema.setup_instruments
-SET ENABLED = 'YES', TIMED = 'YES' 
-WHERE NAME LIKE 'statement/%';
-
--- Disable high-overhead instruments
-UPDATE performance_schema.setup_instruments
-SET ENABLED = 'NO', TIMED = 'NO'
-WHERE NAME LIKE 'wait/io/file/%'
-   OR NAME LIKE 'wait/io/table/%'
-   OR NAME LIKE 'wait/lock/metadata/%'
-   OR NAME LIKE 'wait/lock/table/%'
-   OR NAME LIKE 'wait/sync/rwlock/%'
-   OR NAME LIKE 'wait/sync/mutex/%'
-   OR NAME LIKE 'wait/sync/cond/%';
-EOT
-}
-
-variable "sns_topic_arn" {
-  description = "ARN of the SNS topic for alerts"
-  type        = string
-  default     = ""
 }
 
 variable "create_alarms" {
@@ -187,12 +97,8 @@ variable "create_alarms" {
   default     = true
 }
 
-variable "tags" {
-  description = "Tags to apply to resources"
-  type        = map(string)
-  default     = {
-    Managed_By  = "Terraform"
-    Service     = "New Relic MySQL Monitoring"
-    Environment = "Production"
-  }
+variable "log_retention_days" {
+  description = "Number of days to retain Lambda logs"
+  type        = number
+  default     = 14
 }

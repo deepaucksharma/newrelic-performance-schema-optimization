@@ -1,125 +1,151 @@
-# Performance Schema Automation Terraform Module
+# Terraform Module for Performance Schema Automation
 
-This directory contains a complete Terraform module for implementing Performance Schema (P_S) automation on AWS RDS and Aurora MySQL databases with New Relic monitoring.
+This directory contains a Terraform module for deploying the New Relic MySQL Performance Schema automation solution.
 
-## Module Features
+## Module Overview
 
-- Creates optimized Parameter Groups for RDS/Aurora
-- Deploys Lambda function for runtime configuration
-- Configures EventBridge rules for automation triggers
-- Sets up CloudWatch monitoring and alerting
-- Implements security best practices with IAM and VPC configuration
-- Optional RDS Proxy configuration for improved connection management
+The module creates all the resources needed to automatically maintain MySQL Performance Schema configuration on RDS/Aurora instances:
+
+- DB Parameter Group with Performance Schema baseline settings
+- Lambda function for runtime configuration management
+- IAM roles and policies with least-privilege permissions
+- Security group for Lambda VPC access
+- EventBridge rules for scheduled and event-based triggers
+- CloudWatch logging and optional alerting
+
+## Prerequisites
+
+Before using this module:
+
+1. Build and upload the Lambda code:
+   ```bash
+   cd ../lambda
+   ./build.sh
+   aws s3 cp lambda.zip s3://YOUR-BUCKET/lambda.zip
+   aws s3 cp pymysql-pyyaml-layer.zip s3://YOUR-BUCKET/pymysql-pyyaml-layer.zip
+   ```
+
+2. Upload the configuration YAML:
+   ```bash
+   aws s3 cp ../sql/target-config.yaml s3://YOUR-BUCKET/target-config.yaml
+   ```
+
+3. Ensure you have a VPC with subnets that can access your RDS/Aurora instances
 
 ## Usage
 
+### Basic Usage
+
 ```hcl
 module "perf_schema_automation" {
-  source = "path/to/this/module"
+  source = "./path/to/module"
 
-  # Basic configuration
-  prefix               = "myapp"
-  parameter_family     = "mysql8.0"
-  is_aurora            = false
-  
-  # Database information
-  db_instance_identifier    = "mydb"
-  db_instance_resource_id   = "db-ABCDEF123456789"
-  db_host                   = "mydb.abcdefg.us-east-1.rds.amazonaws.com"
-  db_security_group_id      = "sg-01234567890abcdef"
-  
-  # Network configuration
-  vpc_id               = "vpc-01234567890abcdef"
-  subnet_ids           = ["subnet-1", "subnet-2", "subnet-3"]
-  
-  # Authentication
-  db_secret_arn        = "arn:aws:secretsmanager:us-east-1:123456789012:secret:mydb-credentials-ABCDEF"
-  use_iam_auth         = true
-  
-  # RDS Proxy configuration
-  create_proxy         = true
-  
-  # Alerting
-  sns_topic_arn        = "arn:aws:sns:us-east-1:123456789012:db-alerts"
-  create_alarms        = true
-  
-  # Performance Schema configuration
-  max_digest_length    = "1024"
-  max_sql_text_length  = "4096"
-  performance_schema_hash = "46b5fa75e2ee862b8903e17b8fc9a5ee22e9812fa86af68cc37c3e659ecfe0fd"
-  
-  # Tags
-  tags = {
-    Environment = "Production"
-    Service     = "New Relic Monitoring"
-    Managed_By  = "Terraform"
-  }
+  database_id = "my-mysql-instance"
+  sql_bucket  = "my-s3-bucket"
+  vpc_id      = "vpc-12345678"
+  subnet_ids  = ["subnet-1234abcd", "subnet-5678efgh"]
 }
 ```
 
-## Aurora-Specific Configuration
-
-For Aurora clusters, use these settings:
+### Complete Example
 
 ```hcl
 module "perf_schema_automation" {
-  source = "path/to/this/module"
+  source = "./path/to/module"
+
+  prefix         = "nr-mysql-perf"
+  engine_family  = "mysql8.0"
+  database_id    = "my-mysql-instance"
+  is_aurora      = false
+  sql_bucket     = "my-s3-bucket"
+  sql_key        = "target-config.yaml"
+  lambda_code_key = "lambda.zip"
+  lambda_layer_key = "pymysql-pyyaml-layer.zip"
+  vpc_id         = "vpc-12345678"
+  subnet_ids     = ["subnet-1234abcd", "subnet-5678efgh"]
+  use_iam_auth   = true
+  db_user        = "lambda_perf_schema"
+  new_relic_account_id = "12345"
   
-  # Aurora-specific settings
-  is_aurora              = true
-  parameter_family       = "aurora-mysql8.0"
-  cluster_parameter_family = "aurora-mysql8.0"
-  db_cluster_identifier  = "mycluster"
-  db_cluster_resource_id = "cluster-ABCDEF123456789"
+  tags = {
+    Environment = "production"
+    Project     = "database-monitoring"
+  }
   
-  # ... other settings as above
+  create_alarms = true
+  log_retention_days = 30
 }
 ```
 
 ## Input Variables
 
-See [variables.tf](variables.tf) for a complete list of input variables and their descriptions.
+| Name | Description | Type | Default |
+|------|-------------|------|---------|
+| `prefix` | Prefix for resource names | `string` | `"nr-mysql-ps"` |
+| `engine_family` | MySQL/Aurora engine family | `string` | `"mysql8.0"` |
+| `database_id` | RDS instance or Aurora cluster ID | `string` | |
+| `is_aurora` | Whether target is Aurora cluster | `bool` | `false` |
+| `sql_bucket` | S3 bucket with config and code | `string` | |
+| `sql_key` | S3 key for YAML config | `string` | `"target-config.yaml"` |
+| `lambda_code_key` | S3 key for Lambda zip | `string` | `"lambda.zip"` |
+| `lambda_layer_key` | S3 key for Lambda layer | `string` | `"pymysql-pyyaml-layer.zip"` |
+| `vpc_id` | VPC ID for Lambda | `string` | |
+| `subnet_ids` | Subnet IDs for Lambda | `list(string)` | |
+| `db_secret_arn` | Secret ARN for credentials | `string` | `""` |
+| `use_iam_auth` | Use IAM auth for DB | `bool` | `true` |
+| `db_user` | Database username | `string` | `"lambda_perf_schema"` |
+| `new_relic_account_id` | New Relic account ID | `string` | `""` |
+| `tags` | Resource tags | `map(string)` | |
+| `create_alarms` | Create CloudWatch alarms | `bool` | `true` |
+| `log_retention_days` | Lambda log retention days | `number` | `14` |
 
 ## Outputs
 
-See [outputs.tf](outputs.tf) for a complete list of outputs.
+| Name | Description |
+|------|-------------|
+| `parameter_group_name` | Created parameter group name |
+| `parameter_group_arn` | Parameter group ARN |
+| `lambda_function_name` | Lambda function name |
+| `lambda_function_arn` | Lambda function ARN |
+| `lambda_log_group_name` | CloudWatch log group name |
+| `daily_check_rule_name` | Daily check EventBridge rule |
+| `rds_events_rule_name` | RDS events EventBridge rule |
+| `security_group_id` | Lambda security group ID |
+| `db_user` | Database user name |
+| `db_setup_command` | SQL command to create DB user |
+| `next_steps` | Next steps after deployment |
 
-## Implementation Notes
+## Post-Deployment
 
-1. **Database User Setup**: This module assumes you've created the `lambda_perf_schema` user in your database:
+After successful deployment:
 
+1. Attach the created parameter group to your RDS/Aurora instance
+2. Create the required database user:
    ```sql
-   -- For IAM authentication (recommended)
    CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
-   GRANT SELECT, UPDATE ON performance_schema.* TO 'lambda_perf_schema'@'%';
+   GRANT SELECT ON performance_schema.* TO 'lambda_perf_schema'@'%';
+   GRANT SELECT ON information_schema.* TO 'lambda_perf_schema'@'%';
    ```
-
-2. **Parameter Group Application**: After applying this module, you must associate the created parameter group with your RDS instance or Aurora cluster and restart the database to apply the settings.
-
-3. **Secrets Manager**: When using password authentication, create a secret in AWS Secrets Manager with the format:
-   ```json
-   {
-     "username": "lambda_perf_schema",
-     "password": "your-secure-password"
-   }
-   ```
+3. Reboot your database instance
+4. Check CloudWatch logs to verify successful execution
 
 ## Customization
 
-You can customize the SQL statements applied to Performance Schema by modifying the `sql_update_statements` variable. The default statements are optimized for New Relic monitoring.
+To customize the Performance Schema configuration, modify the `target-config.yaml` file and update it in S3. The Lambda function will use this configuration on its next execution.
 
-## Security Considerations
+## Using in Existing Infrastructure
 
-1. **IAM Authentication**: We strongly recommend using IAM authentication rather than password authentication for the database connection.
+To use this module with existing resources:
 
-2. **VPC Configuration**: The Lambda function operates within your VPC and requires outbound connectivity to your database.
-
-3. **Least Privilege**: The IAM roles are configured with least privilege principles.
-
-## Monitoring
-
-The module creates CloudWatch Logs metric filters and optionally CloudWatch Alarms to monitor Performance Schema configuration drift and error conditions.
-
----
-
-© New Relic, Inc. | Internal use and authorized customers only
+```hcl
+# For existing VPC and subnets
+module "perf_schema_automation" {
+  source = "./path/to/module"
+  
+  database_id = aws_db_instance.existing.id
+  vpc_id      = data.aws_vpc.existing.id
+  subnet_ids  = data.aws_subnets.private.ids
+  sql_bucket  = aws_s3_bucket.existing.id
+  # ... other variables
+}
+```

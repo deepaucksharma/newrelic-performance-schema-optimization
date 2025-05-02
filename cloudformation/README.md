@@ -1,116 +1,128 @@
-# Performance Schema Automation CloudFormation Template
+# CloudFormation Template for Performance Schema Automation
 
-This directory contains a complete CloudFormation template for implementing Performance Schema (P_S) automation on AWS RDS and Aurora MySQL databases with New Relic monitoring.
+This directory contains the AWS CloudFormation template for deploying the complete Performance Schema automation solution.
 
-## Template Features
+## Template Overview
 
-- Creates optimized Parameter Groups for RDS/Aurora
-- Deploys Lambda function for runtime configuration
-- Configures EventBridge rules for automation triggers
-- Sets up CloudWatch monitoring, alerting, and dashboards
-- Implements security best practices with IAM and VPC configuration
-- Optional RDS Proxy configuration for improved connection management
-- Optional SNS notification system
+The `perf-schema-automation.yaml` template creates all resources needed to automatically maintain MySQL Performance Schema configuration on RDS/Aurora:
+
+- RDS Parameter Group with Performance Schema baseline settings
+- Lambda function to apply and maintain runtime configurations
+- IAM roles and policies with least-privilege permissions
+- Security group for Lambda VPC access
+- EventBridge rules for scheduled and event-based triggers
+- CloudWatch logging and optional alerting
+
+## Prerequisites
+
+Before deploying the template:
+
+1. Build and upload the Lambda code:
+   ```bash
+   cd ../lambda
+   ./build.sh
+   aws s3 cp lambda.zip s3://YOUR-BUCKET/lambda.zip
+   aws s3 cp pymysql-pyyaml-layer.zip s3://YOUR-BUCKET/pymysql-pyyaml-layer.zip
+   ```
+
+2. Upload the configuration YAML:
+   ```bash
+   aws s3 cp ../sql/target-config.yaml s3://YOUR-BUCKET/target-config.yaml
+   ```
+
+3. Ensure you have a VPC with subnets that can access your RDS/Aurora instances
 
 ## Deployment
-
-### Using AWS Management Console
-
-1. Navigate to the CloudFormation console
-2. Click "Create stack" > "With new resources (standard)"
-3. Select "Upload a template file" and upload `performance-schema-automation.yaml`
-4. Follow the prompts to specify stack name and parameters
-5. Review and create the stack
 
 ### Using AWS CLI
 
 ```bash
-aws cloudformation create-stack \
-  --stack-name newrelic-perf-schema-optimization \
-  --template-body file://performance-schema-automation.yaml \
-  --parameters \
-    ParameterKey=DatabaseIdentifier,ParameterValue=mydb \
-    ParameterKey=IsAurora,ParameterValue=false \
-    ParameterKey=DatabaseHost,ParameterValue=mydb.abcdefg.us-east-1.rds.amazonaws.com \
-    ParameterKey=DatabaseSecretArn,ParameterValue=arn:aws:secretsmanager:region:account:secret:name \
-    ParameterKey=VpcId,ParameterValue=vpc-01234567890abcdef \
-    ParameterKey=SubnetIds,ParameterValue=subnet-1\\,subnet-2\\,subnet-3 \
-    ParameterKey=DatabaseSecurityGroupId,ParameterValue=sg-01234567890abcdef \
-    ParameterKey=ParameterGroupFamily,ParameterValue=mysql8.0 \
-    ParameterKey=UseIamAuth,ParameterValue=true \
-    ParameterKey=CreateRDSProxy,ParameterValue=true \
-    ParameterKey=NotificationEmail,ParameterValue=alerts@example.com \
-  --capabilities CAPABILITY_IAM
+aws cloudformation deploy \
+  --template-file perf-schema-automation.yaml \
+  --stack-name nr-perf-schema-optimizer \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+      Prefix=nr-mysql-ps \
+      EngineFamily=mysql8.0 \
+      DatabaseId=YOUR-DB-ID \
+      IsAurora=false \
+      SqlBucket=YOUR-BUCKET \
+      SqlKey=target-config.yaml \
+      VpcId=vpc-xxxxx \
+      SubnetIds='["subnet-xxxxx","subnet-yyyyy"]' \
+      UseIamAuth=true \
+      NewRelicAccountId=YOUR-NR-ACCOUNT
 ```
+
+### Using AWS Console
+
+1. Navigate to CloudFormation in the AWS Console
+2. Click "Create stack" > "With new resources"
+3. Upload the template file
+4. Fill in the parameters as described below
+5. Follow the prompts to complete stack creation
 
 ## Parameters
 
-| Parameter | Description | Default | Required |
-|-----------|-------------|---------|----------|
-| Prefix | Resource name prefix | "newrelic" | No |
-| DatabaseIdentifier | RDS instance or Aurora cluster ID | - | Yes |
-| IsAurora | Whether database is an Aurora cluster | "false" | No |
-| DatabaseHost | Database hostname/endpoint | - | Yes |
-| DatabaseSecretArn | ARN of Secrets Manager secret | - | Yes |
-| VpcId | VPC ID | - | Yes |
-| SubnetIds | List of subnet IDs | - | Yes |
-| DatabaseSecurityGroupId | Security group ID of database | - | Yes |
-| UseIamAuth | Use IAM authentication | "true" | No |
-| CreateRDSProxy | Create an RDS Proxy | "true" | No |
-| NotificationEmail | Email for notifications | "" | No |
-| ParameterGroupFamily | DB parameter group family | "mysql8.0" | No |
-| ClusterParameterGroupFamily | Aurora cluster parameter group family | "" | No |
-
-## Post-Deployment Steps
-
-After successful deployment:
-
-1. Associate the created parameter group with your database:
-   ```bash
-   # For RDS instance
-   aws rds modify-db-instance \
-     --db-instance-identifier mydb \
-     --db-parameter-group-name <stack-name>-perf-schema-optimized \
-     --apply-immediately
-   
-   # For Aurora cluster
-   aws rds modify-db-cluster \
-     --db-cluster-identifier mycluster \
-     --db-cluster-parameter-group-name <stack-name>-perf-schema-cluster \
-     --apply-immediately
-   ```
-
-2. Create the database user required for the Lambda function:
-   ```sql
-   -- For IAM authentication
-   CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
-   GRANT SELECT, UPDATE ON performance_schema.* TO 'lambda_perf_schema'@'%';
-   FLUSH PRIVILEGES;
-   ```
-
-3. Test the Lambda function by invoking it manually from the AWS Console or CLI
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `Prefix` | Prefix for all resource names | nr-mysql-ps |
+| `EngineFamily` | MySQL/Aurora engine family | mysql8.0 |
+| `DatabaseId` | RDS Instance ID or Aurora Cluster ID | (required) |
+| `IsAurora` | Whether target is Aurora cluster | false |
+| `SqlBucket` | S3 bucket with configuration and code | (required) |
+| `SqlKey` | S3 key for configuration YAML | target-config.yaml |
+| `VpcId` | VPC ID where Lambda will run | (required) |
+| `SubnetIds` | Subnet IDs where Lambda will run | (required) |
+| `DBSecretArn` | Secrets Manager ARN for credentials | (optional) |
+| `UseIamAuth` | Use IAM authentication for DB | true |
+| `NewRelicAccountId` | New Relic account ID for logging | (optional) |
 
 ## Outputs
 
-| Output | Description |
-|--------|-------------|
-| ParameterGroupName | Name of the created DB parameter group |
-| ClusterParameterGroupName | Name of the created DB cluster parameter group (Aurora only) |
-| LambdaFunctionName | Name of the Lambda function |
-| LambdaFunctionArn | ARN of the Lambda function |
-| ProxyEndpoint | Endpoint of the RDS Proxy (if created) |
-| DashboardURL | URL of the CloudWatch dashboard |
-| EventBridgeRules | Names of created EventBridge rules |
-| NotificationTopicArn | ARN of the SNS topic (if created) |
+The CloudFormation stack provides the following outputs:
+
+- `ParameterGroupName`: Name of the created parameter group
+- `LambdaName`: Name of the Lambda function
+- `LambdaLogGroupName`: Name of the CloudWatch log group
+- `DailyCheckRuleName`: Name of the daily schedule rule
+- `RDSEventsRuleName`: Name of the RDS events rule
+- `DB_USER`: Database user needed for Lambda access
+
+## Post-Deployment
+
+After successful deployment:
+
+1. Attach the created parameter group to your RDS/Aurora instance
+2. Create the required database user:
+   ```sql
+   CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
+   GRANT SELECT ON performance_schema.* TO 'lambda_perf_schema'@'%';
+   GRANT SELECT ON information_schema.* TO 'lambda_perf_schema'@'%';
+   ```
+3. Reboot your database instance
+4. Check CloudWatch logs to verify successful execution
+
+## Updating the Stack
+
+When updating the template or parameters:
+
+```bash
+aws cloudformation update-stack \
+  --stack-name nr-perf-schema-optimizer \
+  --template-body file://perf-schema-automation.yaml \
+  --capabilities CAPABILITY_IAM \
+  --parameters ParameterKey=Prefix,ParameterValue=nr-mysql-ps \
+               ParameterKey=DatabaseId,ParameterValue=YOUR-DB-ID \
+               # Add other parameters as needed
+```
 
 ## Cleanup
 
-To remove all resources created by this template:
+To remove all created resources:
 
 ```bash
-aws cloudformation delete-stack --stack-name <stack-name>
+aws cloudformation delete-stack --stack-name nr-perf-schema-optimizer
 ```
 
----
-
-© New Relic, Inc. | Internal use and authorized customers only
+Note: This will not remove the parameter group from any RDS instances it's attached to. You'll need to modify those instances to use a different parameter group first.

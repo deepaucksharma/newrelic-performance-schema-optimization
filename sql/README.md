@@ -1,92 +1,97 @@
-# Performance Schema SQL Configuration Scripts
+# SQL and Configuration Files
 
-This directory contains SQL scripts for configuring MySQL Performance Schema (P_S) for optimal integration with New Relic monitoring.
+This directory contains SQL scripts and the target configuration YAML file for Performance Schema optimization.
 
 ## Files
 
-- `perf-schema-configuration.sql`: Complete SQL script for Performance Schema configuration and verification
+- `target-config.yaml` - The canonical desired state specification for Performance Schema
+- `perf-schema-configuration.sql` - SQL script with manual configuration commands
+- `verification.sql` - Queries to verify the configuration is applied correctly
+
+## Target Configuration YAML
+
+The `target-config.yaml` file defines which Performance Schema components should be enabled and disabled. This file is read by the Lambda function to determine what changes to apply.
+
+Key sections:
+
+```yaml
+consumers_enabled:
+  # List of performance_schema.setup_consumers to enable
+  - events_statements_current
+  - events_statements_history
+  - statements_digest
+
+instruments_enabled_prefixes:
+  # Instrument prefixes to enable (with wildcard matching)
+  - statement/%
+  - memory/performance_schema
+
+instruments_enabled_exact:
+  # Specific instruments to enable (exact matches)
+  - wait/io/file/innodb/innodb_data_file
+  - wait/io/file/innodb/innodb_log_file
+
+instruments_disabled_prefixes:
+  # Instrument prefixes to disable (with wildcard matching)
+  - wait/sync/%
+  - events_stages_%
+```
+
+## Customization
+
+To customize the Performance Schema configuration:
+
+1. Edit the `target-config.yaml` file according to your monitoring needs
+2. Upload the modified file to your S3 bucket:
+   ```bash
+   aws s3 cp target-config.yaml s3://YOUR-BUCKET/target-config.yaml
+   ```
+3. The Lambda function will apply the changes on its next execution
+
+## New Relic Optimization
+
+The default configuration in `target-config.yaml` is optimized for New Relic MySQL monitoring:
+
+- Enables statement digests for query performance tracking
+- Captures key I/O and lock metrics
+- Disables low-value or high-overhead instruments
+- Provides optimal balance between monitoring and performance
+
+This reduces data ingest volume by 40-70% while maintaining visibility into important metrics.
 
 ## Manual Configuration
 
-While the primary goal of this repository is to automate Performance Schema configuration, these scripts can also be used for manual configuration in environments where automation isn't feasible.
+If you need to manually configure Performance Schema, use the `perf-schema-configuration.sql` script as a reference. Execute these commands on your MySQL instance:
 
-### Prerequisites
+```bash
+mysql -h YOUR_HOST -u admin -p < perf-schema-configuration.sql
+```
 
-- MySQL 5.7+ or Aurora MySQL compatible database
-- Database user with SELECT and UPDATE privileges on the performance_schema tables
-- MySQL client or administration tool (MySQL Workbench, CLI, etc.)
+Note that manual configuration will be lost after a reboot or failover, which is why the automated solution is recommended.
 
-### Steps for Manual Configuration
+## Verification
 
-1. Connect to your MySQL/Aurora database:
-   ```bash
-   mysql -h your-db-host -u admin -p
-   ```
+To verify that the configuration has been applied correctly, you can use:
 
-2. Create a dedicated user for Performance Schema management (if using automation):
-   ```sql
-   -- For IAM authentication (recommended for AWS environments)
-   CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
-   GRANT SELECT, UPDATE ON performance_schema.* TO 'lambda_perf_schema'@'%';
-   FLUSH PRIVILEGES;
-   
-   -- For password authentication (alternative)
-   CREATE USER 'perf_schema_admin'@'%' IDENTIFIED BY 'strong-password';
-   GRANT SELECT, UPDATE ON performance_schema.* TO 'perf_schema_admin'@'%';
-   FLUSH PRIVILEGES;
-   ```
+```sql
+-- Check if Performance Schema is enabled
+SHOW VARIABLES LIKE 'performance_schema';
 
-3. Apply the Performance Schema configuration:
-   ```bash
-   mysql -h your-db-host -u admin -p < perf-schema-configuration.sql
-   ```
+-- Verify consumers are enabled
+SELECT NAME, ENABLED FROM performance_schema.setup_consumers
+WHERE NAME IN ('events_statements_current','events_statements_history','statements_digest');
 
-4. Verify the configuration was applied correctly:
-   ```sql
-   -- Check consumer settings
-   SELECT NAME, ENABLED 
-   FROM performance_schema.setup_consumers
-   WHERE NAME LIKE 'events%'
-   ORDER BY NAME;
-   
-   -- Check statement instruments
-   SELECT COUNT(*) AS enabled_statements
-   FROM performance_schema.setup_instruments
-   WHERE NAME LIKE 'statement/%' AND ENABLED = 'YES';
-   
-   -- Check wait instruments (should be limited)
-   SELECT COUNT(*) AS enabled_waits
-   FROM performance_schema.setup_instruments
-   WHERE NAME LIKE 'wait/%' AND ENABLED = 'YES';
-   ```
+-- Check instrument status for statements (should be enabled)
+SELECT NAME, ENABLED, TIMED FROM performance_schema.setup_instruments
+WHERE NAME LIKE 'statement/%' LIMIT 5;
 
-## Using with AWS RDS Parameter Groups
+-- Check disabled instruments
+SELECT COUNT(*) FROM performance_schema.setup_instruments
+WHERE NAME LIKE 'wait/sync/%' AND ENABLED = 'NO';
+```
 
-For persistent Performance Schema settings, create a custom parameter group with:
+## Additional Notes
 
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| performance_schema | 1 | Master switch |
-| performance_schema_consumer_events_statements_current | 1 | Required for SQL metrics |
-| performance_schema_consumer_events_statements_history | 1 | Required for recent history |
-| performance_schema_consumer_events_statements_history_long | 0 | High overhead |
-| performance_schema_consumer_events_waits_current | 0 | High overhead |
-| performance_schema_max_digest_length | 1024 | Balanced setting |
-| performance_schema_max_sql_text_length | 4096 | Balanced setting |
-
-## Integration with New Relic
-
-After applying the Performance Schema configuration, verify the integration with New Relic:
-
-1. Wait approximately 5 minutes for data collection
-2. Navigate to New Relic One > Databases
-3. Select your MySQL/Aurora instance
-4. Verify that query samples and digest statistics are appearing
-
-## Maintenance
-
-The Performance Schema configuration in this script needs to be reapplied after database restarts or failovers. Consider implementing the automation solution in this repository for consistent configuration.
-
----
-
-© New Relic, Inc. | Internal use and authorized customers only
+- Changes to `performance_schema` variable itself require a database reboot
+- The Lambda function only changes runtime configuration, not persistent variables
+- For persistent settings, modify the Parameter Group in the IaC templates

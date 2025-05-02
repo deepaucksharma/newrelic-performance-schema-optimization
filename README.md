@@ -1,63 +1,27 @@
-# New Relic MySQL Monitoring Optimization for AWS (2025)
+# Reliably Configuring MySQL Performance Schema on AWS RDS/Aurora for New Relic Monitoring
 
-This repository contains comprehensive resources for optimizing MySQL/Aurora monitoring on AWS RDS and Aurora to ensure efficient integration with New Relic while minimizing system overhead and data costs. Our primary recommendation for 2025 is to leverage AWS Performance Insights as your foundation, supplemented by targeted Performance Schema configurations where needed.
+**The core problem**  
+`UPDATE` statements on `performance_schema.setup_*` tables are memory-only inside
+RDS/Aurora. After every reboot, fail-over or version upgrade they disappear, breaking
+New Relic monitoring and creating observation gaps.
 
-## Repository Structure
+**Solution in two layers**
 
-- **docs/**: Documentation and guides
-  - `performance-insights-guide.md`: Primary recommended approach using AWS PI
-  - `customer-guide.md`: End-user friendly documentation
-  - `implementation-guide.md`: Technical implementation instructions
-  - `automation-comparison.md`: Analysis of implementation approaches
-  - `troubleshooting-guide.md`: Solutions for common issues
-  - `executive-summary.md`: Business-focused overview
+| Layer | Purpose | How we implement |
+|-------|---------|------------------|
+| **Parameter Group** | Persistent baseline: `performance_schema = 1`, buffer sizes, any consumer flags exposed by AWS | 1× DB parameter group per engine family |
+| **Lambda Automation** | Re-apply _all other_ consumer / instrument UPDATEs after every event & on a daily schedule | EventBridge rule → Lambda in VPC, IAM Auth, YAML target-state file in S3 |
 
-- **terraform/**: Complete Terraform module for Performance Schema automation
-  - `main.tf`: Core Terraform configuration
-  - `variables.tf`: Input variables declaration
-  - `outputs.tf`: Output variables
+> **Benefits**   Consistent metrics · 40-70 % ingest savings · < 8 % CPU overhead · zero manual re-configuration
 
-- **cloudformation/**: AWS CloudFormation template
-  - `performance-schema-automation.yaml`: Complete CloudFormation template
+### Get started
+| Step | Action | Docs |
+|------|--------|------|
+| 1 | Review [_Target Configuration_](docs/GUIDE.md#2-target-configuration) | docs/GUIDE.md |
+| 2 | Deploy via **CloudFormation** or **Terraform** | cloudformation/, terraform/ |
+| 3 | Attach parameter group & reboot | See IaC documentation |
+| 4 | Verify with the SQL in [_Verification_](docs/GUIDE.md#6-verification) | docs/GUIDE.md |
 
-- **lambda/**: Lambda function code
-  - `index.py`: Python implementation for runtime configuration
+**Need help?**   New Relic DB engineering: db-support@newrelic.com
 
-- **sql/**: SQL scripts for configuration and verification
-  - `perf-schema-configuration.sql`: Complete SQL configuration script
-
-## Key Benefits
-
-* **Reduced costs**: Lower New Relic data ingest volume (typically 40-70% savings)
-* **Improved performance**: Typically adds only 2-8% CPU overhead on MySQL 8.0.38+
-* **Focused monitoring**: Capture only metrics that drive actionable insights
-* **Consistent visibility**: Automated configuration ensures persistent monitoring
-* **Compliance**: Auditable, consistent monitoring configuration across environments
-
-## Implementation Approach
-
-Our 2025 recommended approach uses a tiered strategy that prioritizes AWS-managed solutions:
-
-1. **Performance Insights (Primary Layer)**: Let AWS do the heavy lifting by enabling Performance Insights to automatically manage Performance Schema
-2. **Parameter Groups (Supplemental Layer)**: Configure buffer sizes and other persistent settings via AWS Parameter Groups
-3. **Lambda + EventBridge (Optional Layer)**: Implement serverless automation only for specialized requirements not addressed by Performance Insights:
-   - Responds to database restart/failover events
-   - Performs scheduled verification
-   - Detects and corrects configuration drift
-   - Provides monitoring and alerting via CloudWatch
-
-## Getting Started
-
-For most MySQL on AWS workloads, start with our [Performance Insights Guide](docs/performance-insights-guide.md) to implement the primary recommended approach. For specialized requirements, refer to the [Implementation Guide](docs/implementation-guide.md) for detailed instructions on supplemental configurations.
-
-## Support
-
-For assistance with Performance Schema optimization:
-
-* Contact your New Relic Technical Account Manager
-* Email our database specialists: db-support@newrelic.com
-* Visit our documentation: [docs.newrelic.com/mysql-monitoring](https://docs.newrelic.com/mysql-monitoring)
-
----
-
-© New Relic, Inc. | Internal use and authorized customers only# newrelic-performance-schema-optimization
+_Related AWS feature_: **Performance Insights** is a managed alternative; see Appendix in docs/GUIDE.md.

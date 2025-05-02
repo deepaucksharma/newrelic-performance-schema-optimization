@@ -1,0 +1,31 @@
+# Target configuration for New Relic optimized Performance Schema settings
+# This is the canonical desired-state specification referenced by Lambda
+
+consumers_enabled:
+  - events_statements_current
+  - events_statements_history
+  - statements_digest
+
+instruments_enabled_prefixes:
+  - statement/%
+  - memory/performance_schema
+
+instruments_enabled_exact:
+  - wait/io/file/innodb/innodb_data_file
+  - wait/io/file/innodb/innodb_log_file
+  - wait/lock/table/sql/handler
+  - wait/lock/metadata/sql/mdl
+  
+instruments_disabled_prefixes:
+  - wait/sync/%
+  - events_stages_%
+  - events_%_history_long
+  - memory/sql/
+  - idle
+
+# Notes:
+# - This configuration is optimized for New Relic MySQL monitoring
+# - Reduces data volume while preserving critical query performance metrics
+# - Expected CPU overhead: 2-8% depending on workload and MySQL version
+# - Captures statements and key wait events while eliminating noise
+# - Reduces ingest volume to New Relic by 40-70%
