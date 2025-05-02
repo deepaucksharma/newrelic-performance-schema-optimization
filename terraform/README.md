@@ -123,8 +123,9 @@ After successful deployment:
 2. Create the required database user:
    ```sql
    CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
-   GRANT SELECT ON performance_schema.* TO 'lambda_perf_schema'@'%';
+   GRANT SELECT, UPDATE ON performance_schema.* TO 'lambda_perf_schema'@'%';
    GRANT SELECT ON information_schema.* TO 'lambda_perf_schema'@'%';
+   FLUSH PRIVILEGES;
    ```
 3. Reboot your database instance
 4. Check CloudWatch logs to verify successful execution

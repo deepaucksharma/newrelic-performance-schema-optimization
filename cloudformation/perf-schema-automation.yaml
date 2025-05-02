@@ -141,13 +141,16 @@ Resources:
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub "arn:aws:s3:::${SqlBucket}/${SqlKey}"
-        - PolicyName: SecretsManagerAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !If [UseSecretManager, !Ref DBSecretArn, !Ref "AWS::NoValue"]
+        - !If
+          - UseSecretManager 
+          - PolicyName: SecretsManagerAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref DBSecretArn
+          - !Ref "AWS::NoValue"
 
   # 5. Lambda function (code uploaded separately)
   PerfSchemaFn:

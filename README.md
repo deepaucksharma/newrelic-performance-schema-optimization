@@ -68,8 +68,9 @@ Create the MySQL user for Lambda using IAM authentication:
 
 ```sql
 CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
-GRANT SELECT ON performance_schema.* TO 'lambda_perf_schema'@'%';
+GRANT SELECT, UPDATE ON performance_schema.* TO 'lambda_perf_schema'@'%';
 GRANT SELECT ON information_schema.* TO 'lambda_perf_schema'@'%';
+FLUSH PRIVILEGES;
 ```
 
 ### 4. Attach Parameter Group

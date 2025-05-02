@@ -50,7 +50,7 @@ def _connect():
     pwd  = _iam_token(host, DB_USER) if IAM_AUTH else None
     return pymysql.connect(host=host, user=DB_USER, password=pwd,
                            port=DB_PORT, connect_timeout=10,
-                           ssl={"ca": "/opt/python/rds-combined-ca-bundle.pem"})
+                           ssl=True)
 
 def _current_state(cur):
     cur.execute("SELECT NAME, ENABLED FROM performance_schema.setup_consumers")

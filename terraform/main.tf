@@ -13,7 +13,7 @@ provider "aws" {
 }
 
 locals {
-  use_secret_manager = var.db_secret_arn != ""
+  use_secret_manager = var.db_secret_arn != "" && var.use_iam_auth == false
 }
 
 # 1. Parameter Group (baseline)
