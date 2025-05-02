@@ -1,0 +1,955 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'New Relic Performance Schema Optimization for MySQL on AWS RDS/Aurora'
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: 'newrelic'
+    Description: 'Prefix for resource names'
+  
+  DatabaseIdentifier:
+    Type: String
+    Description: 'RDS DB instance or Aurora cluster identifier'
+  
+  IsAurora:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: 'Whether the database is an Aurora cluster'
+  
+  DatabaseHost:
+    Type: String
+    Description: 'Database hostname or endpoint'
+  
+  DatabaseSecretArn:
+    Type: String
+    Description: 'ARN of the Secret in Secrets Manager containing database credentials'
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: 'VPC ID where resources will be created'
+  
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: 'List of subnet IDs for Lambda and RDS Proxy'
+  
+  DatabaseSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: 'Security group ID of the database'
+  
+  UseIamAuth:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: 'Whether to use IAM authentication for database access'
+  
+  CreateRDSProxy:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: 'Whether to create an RDS Proxy'
+  
+  NotificationEmail:
+    Type: String
+    Default: ''
+    Description: 'Email address for notification (optional)'
+  
+  ParameterGroupFamily:
+    Type: String
+    Default: 'mysql8.0'
+    Description: 'DB parameter group family (e.g., mysql8.0, aurora-mysql8.0)'
+  
+  ClusterParameterGroupFamily:
+    Type: String
+    Default: ''
+    Description: 'DB cluster parameter group family for Aurora'
+
+Conditions:
+  IsAuroraCluster: !Equals [!Ref IsAurora, 'true']
+  CreateProxy: !Equals [!Ref CreateRDSProxy, 'true']
+  CreateSNSTopic: !Not [!Equals [!Ref NotificationEmail, '']]
+  UseIamAuthentication: !Equals [!Ref UseIamAuth, 'true']
+
+Resources:
+  # Parameter Group
+  PerformanceSchemaParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: 'Optimized Performance Schema settings for New Relic monitoring'
+      Family: !Ref ParameterGroupFamily
+      Parameters:
+        performance_schema: 1
+        performance_schema_consumer_events_statements_current: 1
+        performance_schema_consumer_events_statements_history: 1
+        performance_schema_consumer_events_statements_history_long: 0
+        performance_schema_consumer_events_waits_current: 0
+        performance_schema_max_digest_length: 1024
+        performance_schema_max_sql_text_length: 4096
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-optimized'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # Aurora Cluster Parameter Group (if applicable)
+  PerformanceSchemaClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Condition: IsAuroraCluster
+    Properties:
+      Description: 'Cluster-level Performance Schema settings for New Relic monitoring'
+      Family: !If [IsAuroraCluster, !Ref ClusterParameterGroupFamily, !Ref 'AWS::NoValue']
+      Parameters:
+        performance_schema: 1
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-cluster'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # Security Group for Lambda
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group for Performance Schema Lambda function'
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          DestinationSecurityGroupId: !If [CreateProxy, !Ref ProxySecurityGroup, !Ref DatabaseSecurityGroupId]
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-lambda-sg'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # Security Group for RDS Proxy
+  ProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateProxy
+    Properties:
+      GroupDescription: 'Security group for Performance Schema RDS Proxy'
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          DestinationSecurityGroupId: !Ref DatabaseSecurityGroupId
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-proxy-sg'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # IAM Role for RDS Proxy
+  ProxyRole:
+    Type: AWS::IAM::Role
+    Condition: CreateProxy
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns: []
+      Policies:
+        - PolicyName: ProxySecretsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DatabaseSecretArn
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-proxy-role'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # RDS Proxy
+  PerformanceSchemaProxy:
+    Type: AWS::RDS::DBProxy
+    Condition: CreateProxy
+    Properties:
+      DBProxyName: !Sub '${Prefix}-perf-schema-proxy'
+      EngineFamily: MYSQL
+      RoleArn: !GetAtt ProxyRole.Arn
+      Auth:
+        - AuthScheme: SECRETS
+          IAMAuth: !If [UseIamAuthentication, REQUIRED, DISABLED]
+          SecretArn: !Ref DatabaseSecretArn
+      VpcSubnetIds: !Ref SubnetIds
+      VpcSecurityGroupIds:
+        - !Ref ProxySecurityGroup
+      RequireTLS: true
+      DebugLogging: false
+      IdleClientTimeout: 1800
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-proxy'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # RDS Proxy Target Group
+  ProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Condition: CreateProxy
+    Properties:
+      DBProxyName: !Ref PerformanceSchemaProxy
+      TargetGroupName: default
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 100
+        MaxIdleConnectionsPercent: 50
+      DBClusterIdentifiers: !If [IsAuroraCluster, [!Ref DatabaseIdentifier], !Ref 'AWS::NoValue']
+      DBInstanceIdentifiers: !If [IsAuroraCluster, !Ref 'AWS::NoValue', [!Ref DatabaseIdentifier]]
+
+  # SNS Topic for Notifications
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateSNSTopic
+    Properties:
+      DisplayName: !Sub '${Prefix}-PerformanceSchema-Notifications'
+      TopicName: !Sub '${Prefix}-performance-schema-notifications'
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-notifications'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # Email Subscription for SNS Topic
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CreateSNSTopic
+    Properties:
+      Protocol: email
+      TopicArn: !Ref NotificationTopic
+      Endpoint: !Ref NotificationEmail
+
+  # IAM Role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: PerformanceSchemaLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${Prefix}-perf-schema-configurator:*'
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: '*'
+              - !If
+                - UseIamAuthentication
+                - Effect: Allow
+                  Action: rds-db:connect
+                  Resource: !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/*'
+                - !Ref AWS::NoValue
+              - !If
+                - UseIamAuthentication
+                - !Ref AWS::NoValue
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref DatabaseSecretArn
+              - !If
+                - CreateSNSTopic
+                - Effect: Allow
+                  Action: sns:Publish
+                  Resource: !Ref NotificationTopic
+                - !Ref AWS::NoValue
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-lambda-role'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # Lambda Function
+  PerformanceSchemaLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${Prefix}-perf-schema-configurator'
+      Description: 'Configures Performance Schema for New Relic monitoring'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      MemorySize: 128
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import pymysql
+          import os
+          import logging
+          import hashlib
+          import time
+          from botocore.exceptions import ClientError
+
+          # Configure logging
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          # Environment variables
+          DB_IDENTIFIER = os.environ.get('DB_IDENTIFIER')
+          DB_SECRET_ARN = os.environ.get('DB_SECRET_ARN')
+          DB_USER = os.environ.get('DB_USER', 'lambda_perf_schema')
+          DB_USE_IAM_AUTH = os.environ.get('DB_USE_IAM_AUTH', 'true').lower() == 'true'
+          DB_IS_AURORA = os.environ.get('DB_IS_AURORA', 'false').lower() == 'true'
+          DB_PROXY_ENDPOINT = os.environ.get('DB_PROXY_ENDPOINT', '')
+          DB_HOST = os.environ.get('DB_HOST', '')
+          SNS_TOPIC_ARN = os.environ.get('SNS_TOPIC_ARN', '')
+          PERFORMANCE_SCHEMA_HASH = os.environ.get('PERFORMANCE_SCHEMA_HASH', '')
+          SQL_UPDATE_STATEMENTS = os.environ.get('SQL_UPDATE_STATEMENTS', '')
+
+          # AWS region
+          session = boto3.session.Session()
+          REGION = session.region_name
+
+          def get_secret():
+              """Retrieve database credentials from AWS Secrets Manager"""
+              client = boto3.client('secretsmanager')
+              try:
+                  response = client.get_secret_value(SecretId=DB_SECRET_ARN)
+                  secret_string = response['SecretString']
+                  return json.loads(secret_string)
+              except ClientError as e:
+                  logger.error(f"Error retrieving secret: {e}")
+                  raise
+
+          def get_rds_endpoint():
+              """Get the RDS endpoint for the specified DB instance or cluster"""
+              if DB_PROXY_ENDPOINT:
+                  logger.info(f"Using RDS Proxy endpoint: {DB_PROXY_ENDPOINT}")
+                  return DB_PROXY_ENDPOINT
+              
+              if DB_HOST:
+                  logger.info(f"Using provided DB host: {DB_HOST}")
+                  return DB_HOST
+              
+              # If no proxy or host provided, get from RDS API
+              try:
+                  if DB_IS_AURORA:
+                      rds = boto3.client('rds')
+                      response = rds.describe_db_clusters(DBClusterIdentifier=DB_IDENTIFIER)
+                      return response['DBClusters'][0]['Endpoint']
+                  else:
+                      rds = boto3.client('rds')
+                      response = rds.describe_db_instances(DBInstanceIdentifier=DB_IDENTIFIER)
+                      return response['DBInstances'][0]['Endpoint']['Address']
+              except ClientError as e:
+                  logger.error(f"Error retrieving database endpoint: {e}")
+                  raise
+
+          def get_iam_auth_token(host, port, user):
+              """Generate an IAM authentication token for DB access"""
+              client = boto3.client('rds')
+              try:
+                  token = client.generate_db_auth_token(
+                      DBHostname=host,
+                      Port=port,
+                      DBUsername=user,
+                      Region=REGION
+                  )
+                  return token
+              except ClientError as e:
+                  logger.error(f"Error generating IAM auth token: {e}")
+                  raise
+
+          def connect_to_database(retry_attempts=3, retry_delay=2):
+              """Connect to the database with retry logic"""
+              # Get endpoint and credentials
+              endpoint = get_rds_endpoint()
+              port = 3306
+              
+              if DB_USE_IAM_AUTH:
+                  logger.info("Using IAM authentication")
+                  username = DB_USER
+                  password = get_iam_auth_token(endpoint, port, username)
+              else:
+                  logger.info("Using Secrets Manager for authentication")
+                  secret = get_secret()
+                  username = secret.get('username', DB_USER)
+                  password = secret.get('password')
+              
+              # Attempt connection with retries
+              conn = None
+              last_error = None
+              
+              for attempt in range(retry_attempts):
+                  try:
+                      logger.info(f"Connection attempt {attempt + 1} to {endpoint}")
+                      conn = pymysql.connect(
+                          host=endpoint,
+                          user=username,
+                          password=password,
+                          port=port,
+                          connect_timeout=10,
+                          ssl={'ssl': True}
+                      )
+                      logger.info("Database connection successful")
+                      return conn
+                  except pymysql.MySQLError as e:
+                      last_error = e
+                      logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
+                      if attempt < retry_attempts - 1:
+                          time.sleep(retry_delay)
+              
+              # If we get here, all attempts failed
+              logger.error(f"All connection attempts failed: {last_error}")
+              raise last_error
+
+          def get_current_perf_schema_hash(conn):
+              """Get the current Performance Schema configuration hash"""
+              try:
+                  with conn.cursor() as cursor:
+                      # First check if Performance Schema is enabled
+                      cursor.execute("SHOW VARIABLES LIKE 'performance_schema'")
+                      result = cursor.fetchone()
+                      if not result or result[1].lower() != 'on':
+                          logger.error("Performance Schema is not enabled")
+                          return None
+
+                      # Get current consumer configuration
+                      cursor.execute("""
+                          SELECT CONCAT(NAME, ':', ENABLED) 
+                          FROM performance_schema.setup_consumers 
+                          ORDER BY NAME
+                      """)
+                      consumer_rows = cursor.fetchall()
+                      consumer_state = ';'.join([row[0] for row in consumer_rows])
+                      
+                      # Get current instrument configuration sample
+                      cursor.execute("""
+                          SELECT COUNT(*) AS statement_count
+                          FROM performance_schema.setup_instruments
+                          WHERE NAME LIKE 'statement/%' AND ENABLED = 'YES'
+                      """)
+                      statement_count = cursor.fetchone()[0]
+                      
+                      cursor.execute("""
+                          SELECT COUNT(*) AS wait_count
+                          FROM performance_schema.setup_instruments
+                          WHERE NAME LIKE 'wait/%' AND ENABLED = 'YES'
+                      """)
+                      wait_count = cursor.fetchone()[0]
+
+                      # Create a hash from the current state
+                      state_string = f"{consumer_state};statements:{statement_count};waits:{wait_count}"
+                      current_hash = hashlib.sha256(state_string.encode()).hexdigest()
+                      
+                      logger.info(f"Current P_S state: {state_string}")
+                      logger.info(f"Current P_S hash: {current_hash}")
+                      
+                      return current_hash
+                      
+              except Exception as e:
+                  logger.error(f"Error getting Performance Schema hash: {e}")
+                  raise
+
+          def apply_perf_schema_configuration(conn):
+              """Apply the Performance Schema configuration SQL statements"""
+              try:
+                  with conn.cursor() as cursor:
+                      # Split and execute each SQL statement
+                      statements = SQL_UPDATE_STATEMENTS.split(';')
+                      
+                      # Start transaction
+                      conn.begin()
+                      
+                      for stmt in statements:
+                          if stmt.strip():
+                              logger.info(f"Executing: {stmt.strip()}")
+                              cursor.execute(stmt)
+                      
+                      # Commit all changes
+                      conn.commit()
+                      logger.info("Performance Schema configuration applied successfully")
+                      return True
+                      
+              except Exception as e:
+                  # Rollback on error
+                  if conn:
+                      conn.rollback()
+                  logger.error(f"Error applying Performance Schema configuration: {e}")
+                  raise
+
+          def send_notification(subject, message):
+              """Send an SNS notification"""
+              if not SNS_TOPIC_ARN:
+                  logger.info("No SNS topic provided, skipping notification")
+                  return
+                  
+              try:
+                  sns = boto3.client('sns')
+                  sns.publish(
+                      TopicArn=SNS_TOPIC_ARN,
+                      Message=message,
+                      Subject=subject
+                  )
+                  logger.info(f"Notification sent to {SNS_TOPIC_ARN}")
+              except ClientError as e:
+                  logger.error(f"Error sending notification: {e}")
+
+          def lambda_handler(event, context):
+              """Main Lambda handler"""
+              logger.info(f"Performance Schema configuration check started for {DB_IDENTIFIER}")
+              logger.info(f"Event: {json.dumps(event)}")
+              
+              event_source = event.get('source', '') if isinstance(event, dict) else ''
+              detail_type = event.get('detail-type', '') if isinstance(event, dict) else ''
+              
+              # Extract trigger type for logging
+              if event_source == 'aws.events' and 'scheduled' in detail_type.lower():
+                  trigger_type = 'scheduled'
+              elif event_source == 'aws.rds':
+                  trigger_type = f"rds_event_{event.get('detail', {}).get('EventID', 'unknown')}"
+              else:
+                  trigger_type = 'manual'
+              
+              result = {
+                  'database': DB_IDENTIFIER,
+                  'trigger_type': trigger_type,
+                  'drift_detected': False,
+                  'patch_applied': False,
+                  'error': ''
+              }
+              
+              conn = None
+              try:
+                  # Connect to the database
+                  conn = connect_to_database()
+                  
+                  # Get the current Performance Schema hash
+                  current_hash = get_current_perf_schema_hash(conn)
+                  
+                  if not current_hash:
+                      error_msg = "Could not retrieve Performance Schema state - may not be enabled"
+                      result['error'] = error_msg
+                      send_notification(
+                          f"Performance Schema Check Failed: {DB_IDENTIFIER}", 
+                          error_msg
+                      )
+                      return result
+                  
+                  # Compare with the expected hash
+                  if not PERFORMANCE_SCHEMA_HASH:
+                      logger.warning("No expected Performance Schema hash provided, will apply configuration regardless")
+                      drift_detected = True
+                  else:
+                      drift_detected = current_hash != PERFORMANCE_SCHEMA_HASH
+                  
+                  result['drift_detected'] = drift_detected
+                  
+                  if drift_detected:
+                      logger.info("Performance Schema drift detected, applying configuration")
+                      
+                      # Apply the Performance Schema configuration
+                      apply_perf_schema_configuration(conn)
+                      result['patch_applied'] = True
+                      
+                      # Get the new hash to verify
+                      new_hash = get_current_perf_schema_hash(conn)
+                      
+                      # Check if the configuration was successful
+                      if PERFORMANCE_SCHEMA_HASH and new_hash != PERFORMANCE_SCHEMA_HASH:
+                          logger.warning(f"Applied configuration but hash still doesn't match: {new_hash} vs {PERFORMANCE_SCHEMA_HASH}")
+                          send_notification(
+                              f"Performance Schema Update Warning: {DB_IDENTIFIER}",
+                              f"Performance Schema was updated but the configuration hash doesn't match the expected value.\nCurrent: {new_hash}\nExpected: {PERFORMANCE_SCHEMA_HASH}"
+                          )
+                      else:
+                          logger.info("Performance Schema configuration successfully applied and verified")
+                          send_notification(
+                              f"Performance Schema Updated: {DB_IDENTIFIER}",
+                              f"Performance Schema configuration was successfully applied to {DB_IDENTIFIER}"
+                          )
+                  else:
+                      logger.info("Performance Schema configuration is already correct")
+              
+              except Exception as e:
+                  error_msg = str(e)
+                  logger.error(f"Error: {error_msg}")
+                  result['error'] = error_msg
+                  send_notification(
+                      f"Performance Schema Configuration Error: {DB_IDENTIFIER}",
+                      f"Error configuring Performance Schema on {DB_IDENTIFIER}: {error_msg}"
+                  )
+              
+              finally:
+                  # Close the database connection
+                  if conn:
+                      conn.close()
+                      logger.info("Database connection closed")
+              
+              # Log the result as JSON for metric extraction
+              logger.info(json.dumps(result))
+              return result
+      Environment:
+        Variables:
+          DB_IDENTIFIER: !Ref DatabaseIdentifier
+          DB_SECRET_ARN: !Ref DatabaseSecretArn
+          DB_USER: 'lambda_perf_schema'
+          DB_USE_IAM_AUTH: !Ref UseIamAuth
+          DB_IS_AURORA: !Ref IsAurora
+          DB_PROXY_ENDPOINT: !If [CreateProxy, !GetAtt PerformanceSchemaProxy.Endpoint, '']
+          DB_HOST: !Ref DatabaseHost
+          SNS_TOPIC_ARN: !If [CreateSNSTopic, !Ref NotificationTopic, '']
+          PERFORMANCE_SCHEMA_HASH: '46b5fa75e2ee862b8903e17b8fc9a5ee22e9812fa86af68cc37c3e659ecfe0fd'
+          SQL_UPDATE_STATEMENTS: |
+            -- Enable statement consumers
+            UPDATE performance_schema.setup_consumers
+            SET ENABLED = 'YES'
+            WHERE NAME IN (
+              'events_statements_current',
+              'events_statements_history',
+              'statements_digest'
+            );
+
+            -- Disable high-overhead consumers
+            UPDATE performance_schema.setup_consumers
+            SET ENABLED = 'NO'
+            WHERE NAME IN (
+              'events_statements_history_long',
+              'events_stages_current',
+              'events_stages_history',
+              'events_stages_history_long',
+              'events_waits_current', 
+              'events_waits_history',
+              'events_waits_history_long'
+            );
+
+            -- Enable statement instruments
+            UPDATE performance_schema.setup_instruments
+            SET ENABLED = 'YES', TIMED = 'YES' 
+            WHERE NAME LIKE 'statement/%';
+
+            -- Disable high-overhead instruments
+            UPDATE performance_schema.setup_instruments
+            SET ENABLED = 'NO', TIMED = 'NO'
+            WHERE NAME LIKE 'wait/io/file/%'
+               OR NAME LIKE 'wait/io/table/%'
+               OR NAME LIKE 'wait/lock/metadata/%'
+               OR NAME LIKE 'wait/lock/table/%'
+               OR NAME LIKE 'wait/sync/rwlock/%'
+               OR NAME LIKE 'wait/sync/mutex/%'
+               OR NAME LIKE 'wait/sync/cond/%';
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroup
+        SubnetIds: !Ref SubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-lambda'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # EventBridge Rule - Daily Check
+  ScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${Prefix}-perf-schema-daily-check'
+      Description: 'Daily check for Performance Schema configuration'
+      ScheduleExpression: 'rate(1 day)'
+      State: ENABLED
+      Targets:
+        - Id: PerformanceSchemaLambda
+          Arn: !GetAtt PerformanceSchemaLambda.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-scheduled-rule'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # EventBridge Rule - RDS Events
+  EventsRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${Prefix}-perf-schema-db-events'
+      Description: 'Detect database events that require Performance Schema reconfiguration'
+      EventPattern:
+        source:
+          - aws.rds
+        detail-type:
+          - RDS DB Instance Event
+          - RDS DB Cluster Event
+        detail:
+          EventID:
+            - RDS-EVENT-0004  # DB instance restarted
+            - RDS-EVENT-0045  # Multi-AZ failover completed
+            - RDS-EVENT-0046  # Multi-AZ failover to replica completed
+            - RDS-EVENT-0071  # DB instance point-in-time restore completed
+            - RDS-EVENT-0025  # DB instance recovery completed
+            - RDS-EVENT-0006  # DB instance reboot completed
+      State: ENABLED
+      Targets:
+        - Id: PerformanceSchemaLambda
+          Arn: !GetAtt PerformanceSchemaLambda.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-events-rule'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # Lambda Permission for EventBridge (Scheduled Rule)
+  ScheduledRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PerformanceSchemaLambda
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledRule.Arn
+
+  # Lambda Permission for EventBridge (Events Rule)
+  EventsRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PerformanceSchemaLambda
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventsRule.Arn
+
+  # CloudWatch Log Group for Lambda
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${Prefix}-perf-schema-configurator'
+      RetentionInDays: 30
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-lambda-logs'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # CloudWatch Metric Filter - Drift Detected
+  DriftDetectedMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LambdaLogGroup
+      FilterPattern: '{ $.drift_detected = true }'
+      MetricTransformations:
+        - MetricName: PerfSchemaDriftDetected
+          MetricNamespace: !Sub 'Custom/${Prefix}/PerfSchema'
+          MetricValue: '1'
+
+  # CloudWatch Metric Filter - Patch Success
+  PatchSuccessMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LambdaLogGroup
+      FilterPattern: '{ $.patch_applied = true }'
+      MetricTransformations:
+        - MetricName: PerfSchemaPatchSuccess
+          MetricNamespace: !Sub 'Custom/${Prefix}/PerfSchema'
+          MetricValue: '1'
+
+  # CloudWatch Metric Filter - Error
+  ErrorMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LambdaLogGroup
+      FilterPattern: '{ $.error != "" }'
+      MetricTransformations:
+        - MetricName: PerfSchemaError
+          MetricNamespace: !Sub 'Custom/${Prefix}/PerfSchema'
+          MetricValue: '1'
+
+  # CloudWatch Alarm - Persistent Drift
+  PersistentDriftAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateSNSTopic
+    Properties:
+      AlarmName: !Sub '${Prefix}-perf-schema-persistent-drift'
+      AlarmDescription: 'Performance Schema configuration drift detected and not corrected'
+      MetricName: PerfSchemaDriftDetected
+      Namespace: !Sub 'Custom/${Prefix}/PerfSchema'
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      OKActions:
+        - !Ref NotificationTopic
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-drift-alarm'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # CloudWatch Alarm - Error
+  ErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: CreateSNSTopic
+    Properties:
+      AlarmName: !Sub '${Prefix}-perf-schema-error'
+      AlarmDescription: 'Error occurred during Performance Schema configuration'
+      MetricName: PerfSchemaError
+      Namespace: !Sub 'Custom/${Prefix}/PerfSchema'
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref NotificationTopic
+      OKActions:
+        - !Ref NotificationTopic
+      Tags:
+        - Key: Name
+          Value: !Sub '${Prefix}-perf-schema-error-alarm'
+        - Key: Service
+          Value: 'New Relic MySQL Monitoring'
+
+  # CloudWatch Dashboard
+  PerformanceSchemaDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${Prefix}-performance-schema-monitoring'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "Custom/${Prefix}/PerfSchema", "PerfSchemaDriftDetected", { "stat": "Sum", "period": 3600 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Performance Schema Drift Detected",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 8,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "Custom/${Prefix}/PerfSchema", "PerfSchemaPatchSuccess", { "stat": "Sum", "period": 3600 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Performance Schema Patches Applied",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 0,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "Custom/${Prefix}/PerfSchema", "PerfSchemaError", { "stat": "Sum", "period": 3600 } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Performance Schema Errors",
+                "period": 300
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 6,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${LambdaLogGroup}' | filter @message like 'Performance Schema'",
+                "region": "${AWS::Region}",
+                "title": "Performance Schema Log Events",
+                "view": "table"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 12,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Lambda", "Invocations", "FunctionName", "${Prefix}-perf-schema-configurator" ],
+                  [ "AWS/Lambda", "Errors", "FunctionName", "${Prefix}-perf-schema-configurator" ],
+                  [ "AWS/Lambda", "Duration", "FunctionName", "${Prefix}-perf-schema-configurator", { "stat": "Average" } ]
+                ],
+                "view": "timeSeries",
+                "stacked": false,
+                "region": "${AWS::Region}",
+                "title": "Lambda Function Metrics",
+                "period": 300
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ParameterGroupName:
+    Description: "Name of the DB Parameter Group with optimized Performance Schema settings"
+    Value: !Ref PerformanceSchemaParameterGroup
+
+  ClusterParameterGroupName:
+    Condition: IsAuroraCluster
+    Description: "Name of the DB Cluster Parameter Group with optimized Performance Schema settings"
+    Value: !Ref PerformanceSchemaClusterParameterGroup
+
+  LambdaFunctionName:
+    Description: "Name of the Performance Schema configurator Lambda function"
+    Value: !Ref PerformanceSchemaLambda
+
+  LambdaFunctionArn:
+    Description: "ARN of the Performance Schema configurator Lambda function"
+    Value: !GetAtt PerformanceSchemaLambda.Arn
+
+  ProxyEndpoint:
+    Condition: CreateProxy
+    Description: "Endpoint of the RDS Proxy"
+    Value: !GetAtt PerformanceSchemaProxy.Endpoint
+
+  DashboardURL:
+    Description: "URL of the Performance Schema monitoring dashboard"
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${Prefix}-performance-schema-monitoring"
+
+  EventBridgeRules:
+    Description: "EventBridge rules for Performance Schema monitoring"
+    Value: !Join [", ", [!Ref ScheduledRule, !Ref EventsRule]]
+
+  NotificationTopicArn:
+    Condition: CreateSNSTopic
+    Description: "ARN of the SNS notification topic"
+    Value: !Ref NotificationTopic
