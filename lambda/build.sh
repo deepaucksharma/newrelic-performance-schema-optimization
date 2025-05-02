@@ -15,7 +15,7 @@ cd build && zip -r ../lambda.zip .
 
 # Create layer package (optional - useful for deployment)
 mkdir -p layer/python
-pip install pymysql pyyaml --target layer/python
+pip install --upgrade -r ../requirements.txt --target layer/python
 cd layer && zip -r ../pymysql-pyyaml-layer.zip .
 
 echo "lambda.zip and pymysql-pyyaml-layer.zip ready – upload to S3 & reference in IaC"

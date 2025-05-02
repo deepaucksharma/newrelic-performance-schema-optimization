@@ -59,6 +59,16 @@ Parameters:
     Type: String
     Default: ""
     Description: "Optional: New Relic account ID for logging"
+    
+  DBUser:
+    Type: String
+    Default: "lambda_perf_schema"
+    Description: "Database username for Lambda connection"
+    
+  DBPort:
+    Type: Number
+    Default: 3306
+    Description: "Database port"
 
 Resources:
   # 1. Parameter Group (baseline)
@@ -92,8 +102,8 @@ Resources:
       SecurityGroupEgress:
         - CidrIp: 0.0.0.0/0
           IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
+          FromPort: !Ref DBPort
+          ToPort: !Ref DBPort
       Tags:
         - Key: Name
           Value: !Sub "${Prefix}-lambda-sg"
@@ -123,7 +133,7 @@ Resources:
                 Resource: "*"
               - Effect: Allow
                 Action: rds-db:connect
-                Resource: !Sub "arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/${DB_USER}"
+                Resource: !Sub "arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/${DBUser}"
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
@@ -163,7 +173,8 @@ Resources:
           DB_ID: !Ref DatabaseId
           IS_AURORA: !Ref IsAurora
           IAM_AUTH: !Ref UseIamAuth
-          DB_USER: lambda_perf_schema
+          DB_USER: !Ref DBUser
+          DB_PORT: !Ref DBPort
           NR_ACCOUNT: !Ref NewRelicAccountId
           SECRET_ARN: !If [UseSecretManager, !Ref DBSecretArn, ""]
 
@@ -172,7 +183,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${PerfSchemaFn}"
-      RetentionInDays: 14
+      RetentionInDays: 30
 
   # 7. EventBridge Rules for Lambda triggers
   # Daily schedule
@@ -272,4 +283,4 @@ Outputs:
 
   DB_USER:
     Description: "Database user required for Lambda"
-    Value: lambda_perf_schema
+    Value: !Ref DBUser

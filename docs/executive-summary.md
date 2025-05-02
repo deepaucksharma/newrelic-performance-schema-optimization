@@ -32,8 +32,9 @@ This support package includes:
 
 The recommended solution uses a multi-layered approach:
 
-1. **Parameter Groups** for persistent baseline settings (performance_schema=ON, memory limits)
-2. **Lambda + EventBridge** for automated runtime configuration that:
+1. **AWS Performance Insights** as the primary managed solution (where available)
+2. **Parameter Groups** for persistent baseline settings (performance_schema=ON, memory limits)
+3. **Lambda + EventBridge** for automated runtime configuration that:
    - Applies settings during initial deployment via CloudFormation/Terraform
    - Maintains settings after restarts/failovers via event-driven triggers
    - Performs scheduled verification to detect and correct configuration drift
@@ -65,10 +66,12 @@ For a typical enterprise customer with 50 MySQL/Aurora instances:
 | Metric | Before Optimization | After Optimization | Savings |
 |--------|---------------------|-------------------|---------|
 | Monthly DB monitoring ingest | 500 GB | 200 GB | 300 GB |
-| Monthly ingest cost @ $0.30/GB | $150 | $60 | $90 (60%) |
+| Monthly ingest cost* | $150 | $60 | $90 (60%) |
 | CPU utilization | 65% | 55% | 10% |
 | Annual monitoring cost savings | - | - | $1,080 |
 | Annual infrastructure savings (from reduced resource needs) | - | - | $2,000+ |
+
+*_Note: Ingest cost example is based on a sample rate of $0.30/GB. Actual costs will vary based on customer's specific pricing tier and contract. Please use current New Relic pricing when calculating customer-specific ROI._
 
 The solution pays for itself within 1-2 months through reduced monitoring costs alone, with additional value from improved performance and operational consistency.
 

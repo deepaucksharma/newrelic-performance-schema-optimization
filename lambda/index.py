@@ -5,6 +5,7 @@ Runtime: python3.12
 import json, os, time, logging, yaml, hashlib
 import boto3, pymysql
 from botocore.exceptions import ClientError
+from botocore.config import Config
 
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
@@ -15,13 +16,22 @@ DB_ID     = os.environ["DB_ID"]
 IS_AURORA = os.environ["IS_AURORA"] == "true"
 IAM_AUTH  = os.environ["IAM_AUTH"]  == "true"
 DB_USER   = os.environ.get("DB_USER", "lambda_perf_schema")
+DB_PORT   = int(os.environ.get("DB_PORT", "3306"))
 NR_ACCOUNT = os.environ.get("NR_ACCOUNT", "")  # Optional New Relic account ID for logs
 
 session = boto3.session.Session()
 REGION  = session.region_name
 
+# Configure S3 client with retries
+s3_config = Config(
+    retries = {
+        'max_attempts': 3,
+        'mode': 'standard'
+    }
+)
+
 def _get_target_yaml():
-    s3 = boto3.client("s3")
+    s3 = boto3.client("s3", config=s3_config)
     obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_KEY)
     return yaml.safe_load(obj["Body"].read())
 
@@ -33,13 +43,13 @@ def _rds_endpoint():
 
 def _iam_token(host, user):
     return boto3.client("rds").generate_db_auth_token(
-        DBHostname=host, Port=3306, DBUsername=user, Region=REGION)
+        DBHostname=host, Port=DB_PORT, DBUsername=user, Region=REGION)
 
 def _connect():
     host = _rds_endpoint()
     pwd  = _iam_token(host, DB_USER) if IAM_AUTH else None
     return pymysql.connect(host=host, user=DB_USER, password=pwd,
-                           port=3306, connect_timeout=10,
+                           port=DB_PORT, connect_timeout=10,
                            ssl={"ca": "/opt/python/rds-combined-ca-bundle.pem"})
 
 def _current_state(cur):
@@ -60,7 +70,7 @@ def _diff(target, current):
     for prefix in target["instruments_enabled_prefixes"]:
         sql.append(f"UPDATE performance_schema.setup_instruments "
                    f"SET ENABLED='YES', TIMED='YES' "
-                   f"WHERE NAME LIKE '{prefix}%'")
+                   f"WHERE NAME LIKE '{prefix}'")
     # exact enables
     for name in target["instruments_enabled_exact"]:
         if current[1].get(name, ("NO","NO")) != ("YES","YES"):
@@ -69,7 +79,7 @@ def _diff(target, current):
     # disables
     for prefix in target["instruments_disabled_prefixes"]:
         sql.append(f"UPDATE performance_schema.setup_instruments "
-                   f"SET ENABLED='NO', TIMED='NO' WHERE NAME LIKE '{prefix}%'")
+                   f"SET ENABLED='NO', TIMED='NO' WHERE NAME LIKE '{prefix}'")
     return sql
 
 def lambda_handler(event, _):
@@ -80,7 +90,8 @@ def lambda_handler(event, _):
         "patch_applied": False, 
         "error": "",
         "nr_account": NR_ACCOUNT,
-        "source": "new_relic_perf_schema_optimizer"
+        "source": "new_relic_perf_schema_optimizer",
+        "ts": int(time.time())
     }
     try:
         target = _get_target_yaml()

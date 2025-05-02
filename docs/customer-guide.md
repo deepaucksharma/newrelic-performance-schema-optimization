@@ -1,5 +1,15 @@
 # Customer Guide: Optimizing MySQL Monitoring with New Relic and AWS (2025)
 
+## Decision Tree: Choosing the Right Approach
+
+| Requirement | Recommended Approach |
+|-------------|---------------------|
+| **Standard monitoring needs** | Start with **AWS Performance Insights** (PI) as primary solution ([Performance Insights Guide](performance-insights-guide.md)) |
+| **PI not available** or **Enhanced granularity needed** | Use **Lambda Automation** approach (this guide + [Implementation Guide](implementation-guide.md)) |
+| **Very large or complex workloads** | Use **PI + Parameter Group + Lambda** for comprehensive coverage |
+
+> **New for 2025**: For most MySQL on AWS deployments, Performance Insights provides the simplest path to effective monitoring with minimal overhead. The Lambda automation approach detailed below should be considered complementary for specialized use cases.
+
 ## Introduction
 
 This guide helps you optimize MySQL monitoring on AWS RDS and Aurora using New Relic, with a primary focus on leveraging AWS Performance Insights (PI) complemented by targeted Performance Schema (P_S) configurations where needed.

@@ -15,7 +15,8 @@ instruments_enabled_exact:
   - wait/io/file/innodb/innodb_log_file
   - wait/lock/table/sql/handler
   - wait/lock/metadata/sql/mdl
-  
+  - wait/lock/table/sql/metadata_lock  # MySQL 8.0.34+ lock instrumentation
+
 instruments_disabled_prefixes:
   - wait/sync/%
   - events_stages_%
@@ -29,3 +30,5 @@ instruments_disabled_prefixes:
 # - Expected CPU overhead: 2-8% depending on workload and MySQL version
 # - Captures statements and key wait events while eliminating noise
 # - Reduces ingest volume to New Relic by 40-70%
+# - Memory instrumentation is partially enabled (performance_schema only) and disabled for SQL
+# - Includes MySQL 8.0.34+ lock instrumentation for enhanced deadlock detection
