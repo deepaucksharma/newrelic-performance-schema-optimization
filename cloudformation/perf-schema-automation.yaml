@@ -85,6 +85,10 @@ Parameters:
     Default: 30
     Description: "Retention (days) for Lambda log group"
 
+Conditions:
+  UseSecretManager: !Not [!Equals [!Ref DBSecretArn, ""]]
+  CreateBucket: !Equals [!Ref CreateBucket, "true"]
+
 Resources:
   # 1. Parameter Group (baseline) with underscore parameter names
   PSParameterGroup:
@@ -93,10 +97,10 @@ Resources:
       Family: !Ref EngineFamily
       Description: "New Relic optimized Performance Schema baseline"
       Parameters:
-        performance-schema: "1"
-        performance-schema-digests-size: "10000"
-        performance-schema-max-sql-text-length: "4096"
-        performance-schema-consumer-events-statements-current: "1"
+        performance_schema: "1"
+        performance_schema_digests_size: "10000"
+        performance_schema_max_sql_text_length: "4096"
+        performance_schema_consumer_events_statements_current: "1"
 
   # 1.5. S3 Bucket (conditional)
   ConfigBucket:
@@ -282,10 +286,6 @@ Resources:
         - Name: FunctionName
           Value: !Ref PerfSchemaFn
       TreatMissingData: notBreaching
-
-Conditions:
-  UseSecretManager: !Not [!Equals [!Ref DBSecretArn, ""]]
-  CreateBucket: !Equals [!Ref CreateBucket, "true"]
 
 Outputs:
   ParameterGroupName:

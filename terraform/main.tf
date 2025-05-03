@@ -25,25 +25,10 @@ resource "aws_db_parameter_group" "perf_schema" {
   family      = var.engine_family
   description = "New Relic optimized Performance Schema baseline"
 
-  parameter {
-    name  = "performance-schema"
-    value = "1"
-  }
-
-  parameter {
-    name  = "performance-schema-digests-size"
-    value = "10000"
-  }
-
-  parameter {
-    name  = "performance-schema-max-sql-text-length"
-    value = "4096"
-  }
-
-  parameter {
-    name  = "performance-schema-consumer-events-statements-current"
-    value = "1"
-  }
+  parameter { name = "performance_schema"                                      value = "1"      }
+  parameter { name = "performance_schema_digests_size"                        value = "10000"  }
+  parameter { name = "performance_schema_max_sql_text_length"                 value = "4096"   }
+  parameter { name = "performance_schema_consumer_events_statements_current"  value = "1"      }
 
   tags = var.tags
 }

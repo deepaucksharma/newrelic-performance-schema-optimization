@@ -4,6 +4,7 @@ Runtime: python3.12
 """
 import json, os, time, logging, yaml, hashlib, re
 import boto3, pymysql
+from botocore.utils import get_default_ca_bundle
 from botocore.exceptions import ClientError
 from botocore.config import Config
 
@@ -88,13 +89,7 @@ def _connect():
     host = _rds_endpoint()
     pwd  = _iam_token(host, DB_USER) if IAM_AUTH else None
 
-    # Use AWS SSL bundle; fail if bundle is missing to prevent downgrade
-    ssl_cfg = {}
-    ca_path = "/opt/python/rds-combined-ca-bundle.pem"
-    if os.path.exists(ca_path):
-        ssl_cfg["ca"] = ca_path
-    else:
-        raise RuntimeError("AWS CA bundle missing at {}. Cannot establish secure connection.".format(ca_path))
+    ssl_cfg = {"ca": get_default_ca_bundle()}
 
     return pymysql.connect(host=host,
                            user=DB_USER,
@@ -122,12 +117,16 @@ def _diff(target, current):
                 "sql": "UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME=%s",
                 "params": (name,)
             })
-    # instruments enabled by prefix
+    # instruments enabled by prefix – only if needed
     for prefix in target["instruments_enabled_prefixes"]:
-        sql_params.append({
-            "sql": "UPDATE performance_schema.setup_instruments SET ENABLED='YES', TIMED='YES' WHERE NAME LIKE %s",
-            "params": (prefix,)
-        })
+        needs = any(n.startswith(prefix.rstrip('%')) and v != ("YES","YES")
+                    for n, v in current[1].items())
+        if needs:
+            sql_params.append({
+                "sql": "UPDATE performance_schema.setup_instruments "
+                       "SET ENABLED='YES', TIMED='YES' WHERE NAME LIKE %s",
+                "params": (prefix,)
+            })
     # exact enables
     for name in target["instruments_enabled_exact"]:
         if current[1].get(name, ("NO","NO")) != ("YES","YES"):
@@ -137,10 +136,14 @@ def _diff(target, current):
             })
     # disables
     for prefix in target["instruments_disabled_prefixes"]:
-        sql_params.append({
-            "sql": "UPDATE performance_schema.setup_instruments SET ENABLED='NO', TIMED='NO' WHERE NAME LIKE %s",
-            "params": (prefix,)
-        })
+        needs = any(n.startswith(prefix.rstrip('%')) and current[1][n][0] == "YES"
+                    for n in current[1])
+        if needs:
+            sql_params.append({
+                "sql": "UPDATE performance_schema.setup_instruments "
+                       "SET ENABLED='NO', TIMED='NO' WHERE NAME LIKE %s",
+                "params": (prefix,)
+            })
     return sql_params
 
 def lambda_handler(event, _):
@@ -183,12 +186,9 @@ def lambda_handler(event, _):
         log_safe_result = {k: v for k, v in result.items() if k not in ("error", "database")}
         LOG.info(json.dumps(log_safe_result))
     except Exception as exc:
-        # Roll back any open transaction just in case
-        try:
-            if con:
-                con.rollback()
-        except Exception:
-            pass
+        if con:  # unconditional rollback when possible
+            try: con.rollback()
+            except Exception: pass
         result["error"] = str(exc)
         LOG.error("Failure: %s", exc, exc_info=True)
     return result
