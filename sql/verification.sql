@@ -113,7 +113,8 @@ SELECT 'Digest Table Status' AS check_name,
        END AS notes
 FROM performance_schema.events_statements_summary_by_digest;
 
--- 9. Check for lost instrumentation
+-- 9. Check for lost instrumentation (variable name is case-sensitive!)
+-- IF you see non-zero counts here, enlarge performance_schema_digests_size.
 SELECT 'Lost Instrumentation Check' AS check_name,
        VARIABLE_VALUE AS count,
        CASE
@@ -121,4 +122,4 @@ SELECT 'Lost Instrumentation Check' AS check_name,
          ELSE 'OK: No lost instrumentation'
        END AS notes
 FROM performance_schema.global_status
-WHERE VARIABLE_NAME = 'Performance_schema_digest_lost';
+WHERE VARIABLE_NAME = 'Performance_schema_digest_lost';  -- ← fixed "P"

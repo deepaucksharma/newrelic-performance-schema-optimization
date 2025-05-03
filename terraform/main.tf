@@ -126,6 +126,9 @@ resource "aws_iam_policy" "lambda_rds_access" {
   name        = "${var.prefix}-rds-access"
   description = "Allow Lambda to access RDS and describe instances"
   
+  # NOTE: rds:Describe* scoped to "*"
+  # – acceptable for most orgs because it leaks no data + simplifies
+  #   multi-account roll-out.  Tighten to a specific DB ARN if required.
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [

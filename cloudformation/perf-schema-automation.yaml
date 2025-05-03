@@ -48,9 +48,12 @@ Parameters:
 
   VpcCidr:
     Type: String
-    Description: "CIDR block of the VPC (used to restrict Lambda egress)"
-    # Leave empty to default to your VPC's CIDR (see README tip)
-    # Supply '<vpc-cidr>' (or /32) – empty string will break SG egress
+    Description: |
+      CIDR block the Lambda may reach **inside your VPC**.
+      • Leave empty ("") to fall back to the VPC's *primary* CIDR block
+        (aws ec2 describe-vpcs → Vpcs[0].CidrBlock).
+      • If your DB sits in a *secondary* CIDR, supply that block here
+        (e.g. 10.1.0.0/16).
 
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
@@ -157,9 +160,9 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
-        - PolicyName: RDSAccess
-          PolicyDocument:
-            Version: '2012-10-17'
+        - PolicyName: RDSAccess          # TODO least-privilege:
+          PolicyDocument:                # If you know the exact DB ARN,
+            Version: '2012-10-17'        # replace "Resource: *" with it.
             Statement:
               - Effect: Allow
                 Action:

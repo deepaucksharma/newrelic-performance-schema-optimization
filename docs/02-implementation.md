@@ -76,7 +76,6 @@ Create a custom parameter group with these recommended settings:
 | `performance_schema`                                    | `1`     | master switch |
 | `performance_schema_digests_size`                       | `10000` | 8 MiB         |
 | `performance_schema_max_sql_text_length`                | `4096`  | full SQL text |
-| `performance-schema-consumer-events-statements-current` | `1`     | where exposed |
 
 You can create the parameter group using AWS CLI, Console, or Infrastructure as Code.
 
