@@ -65,11 +65,13 @@ def _connect():
     host = _rds_endpoint()
     pwd  = _iam_token(host, DB_USER) if IAM_AUTH else None
 
-    # Use AWS SSL bundle; fallback to default ssl if bundle is missing
+    # Use AWS SSL bundle; fail if bundle is missing to prevent downgrade
     ssl_cfg = {}
     ca_path = "/opt/python/rds-combined-ca-bundle.pem"
     if os.path.exists(ca_path):
         ssl_cfg["ca"] = ca_path
+    else:
+        raise RuntimeError("AWS CA bundle missing at {}. Cannot establish secure connection.".format(ca_path))
 
     return pymysql.connect(host=host,
                            user=DB_USER,
@@ -77,7 +79,7 @@ def _connect():
                            port=DB_PORT,
                            connect_timeout=10,
                            read_timeout=10,
-                           ssl=ssl_cfg or True)
+                           ssl=ssl_cfg)
 
 def _current_state(cur):
     """Get current Performance Schema state."""
