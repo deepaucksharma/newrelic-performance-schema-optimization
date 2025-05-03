@@ -102,6 +102,8 @@ SELECT NAME, ENABLED, TIMED FROM performance_schema.setup_instruments
 ```
 
 Also check the Lambda CloudWatch logs to verify successful execution.
+If you see `UPDATE` permission errors, re-run the GRANT above (the extra
+`UPDATE` privilege is **required** as of v2025-05-03).
 
 ## Documentation
 

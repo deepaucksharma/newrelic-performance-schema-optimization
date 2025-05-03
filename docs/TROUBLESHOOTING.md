@@ -26,7 +26,7 @@
 | Issue | Resolution |
 |-------|------------|
 | **VPC/Network** | Ensure Lambda has proper subnet access to RDS/Aurora; confirm security groups allow port 3306 |
-| **IAM Auth** | Verify IAM user exists in MySQL: `CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS'` |
+| **IAM Auth** | Verify IAM user exists **and** has `GRANT SELECT, UPDATE ON performance_schema.*` |
 | **Permissions** | Confirm Lambda role has `rds-db:connect` permissions for target database |
 | **S3 Access** | Check Lambda can access S3 bucket with YAML config |
 

@@ -33,7 +33,18 @@ s3_config = Config(
 def _get_target_yaml():
     s3 = boto3.client("s3", config=s3_config)
     obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_KEY)
-    return yaml.safe_load(obj["Body"].read())
+    # --- YAML validation --------------------------------------------------
+    target_raw = yaml.safe_load(obj["Body"].read())
+    expected_keys = {
+        "consumers_enabled": list,
+        "instruments_enabled_prefixes": list,
+        "instruments_enabled_exact": list,
+        "instruments_disabled_prefixes": list,
+    }
+    for k, t in expected_keys.items():
+        if k not in target_raw or not isinstance(target_raw[k], t):
+            raise ValueError(f"YAML missing or invalid key '{k}'")
+    return target_raw
 
 def _rds_endpoint():
     rds = boto3.client("rds")
@@ -116,6 +127,12 @@ def lambda_handler(event, _):
                 
         LOG.info(json.dumps(result))
     except Exception as exc:
+        # Roll back any open transaction just in case
+        try:
+            con.rollback()
+        except Exception:
+            pass
         result["error"] = str(exc)
         LOG.error("Failure: %s", exc, exc_info=True)
     return result
+# NOTE: The duplicate copy in terraform/lambda/ was removed.

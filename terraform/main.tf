@@ -38,7 +38,7 @@ resource "aws_db_parameter_group" "perf_schema" {
   }
 
   parameter {
-    name  = "performance-schema-consumer-events-statements-current"
+    name  = "performance_schema_consumer_events_statements_current"
     value = "1"
   }
 

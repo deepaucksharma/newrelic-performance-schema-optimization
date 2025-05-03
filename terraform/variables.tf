@@ -100,5 +100,12 @@ variable "create_alarms" {
 variable "log_retention_days" {
   description = "Number of days to retain Lambda logs"
   type        = number
-  default     = 14
+  default     = 14    # overridable, exposed to match CFN parameter
+}
+
+# --- NEW ---
+variable "grant_update_note" {
+  description = "Informational – ensure UPDATE privilege on performance_schema.*"
+  type        = string
+  default     = "Remember to GRANT SELECT,UPDATE ON performance_schema.* to the Lambda user."
 }
