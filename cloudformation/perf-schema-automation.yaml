@@ -1,12 +1,12 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: "New Relic - MySQL Performance Schema Optimization: Parameter Group + Lambda automation"
+Description: "New Relic - MySQL Performance Schema Optimization: Parameter Group + Lambda automation (2025-05)"
 
 Parameters:
   Prefix:
     Type: String
     Default: "nr-mysql-ps"
     Description: "Prefix for all created resources"
-  
+
   EngineFamily:
     Type: String
     Default: "mysql8.0"
@@ -16,55 +16,55 @@ Parameters:
       - "aurora-mysql8.0"
       - "aurora-mysql5.7"
     Description: "MySQL/Aurora engine family"
-  
+
   DatabaseId:
     Type: String
     Description: "RDS Instance ID or Aurora Cluster ID"
-  
+
   IsAurora:
     Type: String
     AllowedValues: [true, false]
     Default: false
     Description: "Whether target is Aurora cluster (true) or RDS instance (false)"
-  
+
   SqlBucket:
     Type: String
     Description: "S3 bucket for YAML configuration and Lambda code"
-  
+
   SqlKey:
     Type: String
     Default: "target-config.yaml"
     Description: "S3 key for YAML configuration file"
-  
+
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: "VPC where Lambda will run (must have access to RDS/Aurora)"
-  
+
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: "Subnets where Lambda will run (must have access to RDS/Aurora)"
-  
+
   DBSecretArn:
     Type: String
     Default: ""
     Description: "Optional SecretManager ARN for database credentials (if not using IAM auth)"
-  
+
   UseIamAuth:
     Type: String
     AllowedValues: [true, false]
     Default: true
     Description: "Use IAM authentication for database connection"
-    
+
   NewRelicAccountId:
     Type: String
     Default: ""
     Description: "Optional: New Relic account ID for logging"
-    
+
   DBUser:
     Type: String
     Default: "lambda_perf_schema"
     Description: "Database username for Lambda connection"
-    
+
   DBPort:
     Type: Number
     Default: 3306
@@ -76,7 +76,7 @@ Parameters:
     Description: "Retention (days) for Lambda log group"
 
 Resources:
-  # 1. Parameter Group (baseline)
+  # 1. Parameter Group (baseline) with underscore parameter names
   PSParameterGroup:
     Type: AWS::RDS::DBParameterGroup
     Properties:
@@ -86,7 +86,7 @@ Resources:
         performance_schema: "1"
         performance_schema_digests_size: "10000"
         performance_schema_max_sql_text_length: "4096"
-        performance-schema-consumer-events-statements-current: "1"
+        performance_schema_consumer_events_statements_current: "1"
 
   # 2. Lambda layer (Python libraries)
   PyLayer:
@@ -113,7 +113,7 @@ Resources:
         - Key: Name
           Value: !Sub "${Prefix}-lambda-sg"
 
-  # 4. Lambda execution role
+  # 4. Lambda execution role with conditional Secrets Manager policy
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -146,16 +146,17 @@ Resources:
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub "arn:aws:s3:::${SqlBucket}/${SqlKey}"
-        - !If
-          - UseSecretManager 
-          - PolicyName: SecretsManagerAccess
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action: secretsmanager:GetSecretValue
-                  Resource: !Ref DBSecretArn
-          - !Ref "AWS::NoValue"
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Fn::If:
+              - UseSecretManager
+              - { Version: '2012-10-17',
+                  Statement:
+                    - Effect: Allow
+                      Action: secretsmanager:GetSecretValue
+                      Resource: !Ref DBSecretArn }
+              - { Version: '2012-10-17',
+                  Statement: [] }
 
   # 5. Lambda function (code uploaded separately)
   PerfSchemaFn:
@@ -186,7 +187,7 @@ Resources:
           NR_ACCOUNT: !Ref NewRelicAccountId
           SECRET_ARN: !If [UseSecretManager, !Ref DBSecretArn, ""]
 
-  # 6. CloudWatch LogGroup for Lambda
+  # 6. CloudWatch LogGroup for Lambda with configurable retention
   LambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -194,7 +195,6 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   # 7. EventBridge Rules for Lambda triggers
-  # Daily schedule
   DailyCheckRule:
     Type: AWS::Events::Rule
     Properties:
@@ -206,22 +206,18 @@ Resources:
         - Id: LambdaTarget
           Arn: !GetAtt PerfSchemaFn.Arn
 
-  # RDS events
   RDSEventsRule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub "${Prefix}-rds-events"
       Description: "Trigger on RDS restart/failover events"
       EventPattern:
-        source:
-          - aws.rds
-        detail-type:
-          - RDS DB Instance Event
-          - RDS DB Cluster Event
+        source: [aws.rds]
+        detail-type: ["RDS DB Instance Event","RDS DB Cluster Event"]
         detail:
           EventID:
             - RDS-EVENT-0004  # instance reboot
-            - RDS-EVENT-0045  # failover complete 
+            - RDS-EVENT-0045  # failover complete
             - RDS-EVENT-0046  # failover start
             - RDS-EVENT-0071  # reboot recovery
             - RDS-EVENT-0006  # restart
@@ -230,7 +226,6 @@ Resources:
         - Id: LambdaTarget
           Arn: !GetAtt PerfSchemaFn.Arn
 
-  # 8. Event Rule permissions
   LambdaInvokePermissionDaily:
     Type: AWS::Lambda::Permission
     Properties:

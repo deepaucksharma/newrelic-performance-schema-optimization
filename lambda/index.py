@@ -31,8 +31,10 @@ s3_config = Config(
 )
 
 def _get_target_yaml():
+    """Get and validate the target configuration YAML from S3."""
     s3 = boto3.client("s3", config=s3_config)
     obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_KEY)
+    
     # --- YAML validation --------------------------------------------------
     target_raw = yaml.safe_load(obj["Body"].read())
     expected_keys = {
@@ -47,23 +49,37 @@ def _get_target_yaml():
     return target_raw
 
 def _rds_endpoint():
+    """Get the RDS endpoint based on instance or cluster ID."""
     rds = boto3.client("rds")
     if IS_AURORA:
         return rds.describe_db_clusters(DBClusterIdentifier=DB_ID)["DBClusters"][0]["Endpoint"]
     return rds.describe_db_instances(DBInstanceIdentifier=DB_ID)["DBInstances"][0]["Endpoint"]["Address"]
 
 def _iam_token(host, user):
+    """Generate IAM auth token for RDS."""
     return boto3.client("rds").generate_db_auth_token(
         DBHostname=host, Port=DB_PORT, DBUsername=user, Region=REGION)
 
 def _connect():
+    """Return a pymysql connection using the AWS CA bundle for SSL."""
     host = _rds_endpoint()
     pwd  = _iam_token(host, DB_USER) if IAM_AUTH else None
-    return pymysql.connect(host=host, user=DB_USER, password=pwd,
-                           port=DB_PORT, connect_timeout=10,
-                           ssl=True)
+
+    # Use AWS SSL bundle; fallback to default ssl if bundle is missing
+    ssl_cfg = {}
+    ca_path = "/opt/python/rds-combined-ca-bundle.pem"
+    if os.path.exists(ca_path):
+        ssl_cfg["ca"] = ca_path
+
+    return pymysql.connect(host=host,
+                           user=DB_USER,
+                           password=pwd,
+                           port=DB_PORT,
+                           connect_timeout=10,
+                           ssl=ssl_cfg or True)
 
 def _current_state(cur):
+    """Get current Performance Schema state."""
     cur.execute("SELECT NAME, ENABLED FROM performance_schema.setup_consumers")
     consumers = {n: e for n, e in cur.fetchall()}
     cur.execute("SELECT NAME, ENABLED, TIMED FROM performance_schema.setup_instruments")
@@ -71,6 +87,7 @@ def _current_state(cur):
     return consumers, instr
 
 def _diff(target, current):
+    """Calculate the SQL commands needed to bring current state to match target state."""
     sql = []
     # consumers
     for name in target["consumers_enabled"]:
@@ -94,6 +111,7 @@ def _diff(target, current):
     return sql
 
 def lambda_handler(event, _):
+    """Main Lambda handler function."""
     LOG.info("Event %s", json.dumps(event))
     result = {
         "database": DB_ID, 
@@ -104,9 +122,12 @@ def lambda_handler(event, _):
         "source": "new_relic_perf_schema_optimizer",
         "ts": int(time.time())
     }
+    
+    con = None  # Initialize connection variable outside try block for exception handling
+    
     try:
         target = _get_target_yaml()
-        con  = _connect()
+        con = _connect()
         with con.cursor() as cur:
             current = _current_state(cur)
             updates = _diff(target, current)
@@ -129,10 +150,12 @@ def lambda_handler(event, _):
     except Exception as exc:
         # Roll back any open transaction just in case
         try:
-            con.rollback()
+            if con:
+                con.rollback()
         except Exception:
             pass
         result["error"] = str(exc)
         LOG.error("Failure: %s", exc, exc_info=True)
     return result
+
 # NOTE: The duplicate copy in terraform/lambda/ was removed.
