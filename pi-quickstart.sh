@@ -69,9 +69,10 @@ fi
 
 # Enable Performance Insights
 echo "Enabling Performance Insights for $DB_IDENTIFIER..."
-CMD="aws rds modify-db-instance $REGION_PARAM --db-instance-identifier $DB_IDENTIFIER --enable-performance-insights --performance-insights-retention-period $RETENTION --apply-immediately"
-echo "Executing: $CMD"
-eval $CMD
+echo "Command: aws rds modify-db-instance $REGION_PARAM --db-instance-identifier $DB_IDENTIFIER --enable-performance-insights --performance-insights-retention-period $RETENTION --apply-immediately"
+
+# Execute the command without eval - safer approach
+aws rds modify-db-instance ${REGION_PARAM:+$REGION_PARAM} --db-instance-identifier "$DB_IDENTIFIER" --enable-performance-insights --performance-insights-retention-period "$RETENTION" --apply-immediately
 
 if [ $? -ne 0 ]; then
   echo "Error: Failed to enable Performance Insights"

@@ -10,6 +10,7 @@ DB_ID="your-database-id"
 IS_AURORA="false"
 VPC_ID="vpc-xxxxxxxx"
 SUBNET_IDS='["subnet-xxxxxxxx","subnet-yyyyyyyy"]'
+VPC_CIDR="" # Will be auto-detected if empty
 NEW_RELIC_ACCOUNT="123456"
 REGION="us-east-1"
 ENGINE_FAMILY="mysql8.0"  # Options: mysql8.0, mysql5.7, aurora-mysql8.0, aurora-mysql5.7
@@ -25,6 +26,7 @@ echo "  S3 Bucket:      $S3_BUCKET"
 echo "  Database ID:    $DB_ID"
 echo "  Is Aurora:      $IS_AURORA"
 echo "  VPC ID:         $VPC_ID"
+echo "  VPC CIDR:       $VPC_CIDR"
 echo "  Region:         $REGION"
 echo "  Engine Family:  $ENGINE_FAMILY"
 echo "  Stack Name:     $STACK_NAME"
@@ -39,6 +41,14 @@ read -p "Press Enter to continue or Ctrl+C to cancel..."
 
 # Set AWS region
 export AWS_DEFAULT_REGION="$REGION"
+
+# Auto-detect VPC CIDR if not set
+if [ -z "$VPC_CIDR" ]; then
+  echo "Auto-detecting VPC CIDR for VPC ID: $VPC_ID"
+  VPC_CIDR=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" \
+               --query 'Vpcs[0].CidrBlock' --output text)
+  echo "Detected VPC CIDR: $VPC_CIDR"
+fi
 
 # 1. Build Lambda and dependencies
 echo -e "\n[1/4] Building Lambda function and layer..."
@@ -68,6 +78,7 @@ aws cloudformation deploy \
       SqlKey=target-config.yaml \
       VpcId="$VPC_ID" \
       SubnetIds="$SUBNET_IDS" \
+      VpcCidr="$VPC_CIDR" \
       UseIamAuth=true \
       NewRelicAccountId="$NEW_RELIC_ACCOUNT"
 
