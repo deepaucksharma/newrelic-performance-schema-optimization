@@ -140,8 +140,11 @@ Ensure your Lambda function can access your RDS/Aurora database:
 
 1. Create or use a VPC with private subnets in the same VPC as your database
 2. Set up appropriate security groups:
-   - Lambda security group: Allow outbound to database port (3306)
-   - Database security group: Allow inbound from Lambda security group on port 3306
+   - **Lambda security group** (`${Prefix}-lambda-sg`): outbound TCP 3306 to the VPC.
+   - **Database security group**: **add an *inbound* rule for TCP 3306 whose
+     *source* is the Lambda security-group ID** (see the stack output
+     `LambdaSecurityGroupId`).  Without this rule the Lambda will time-out when
+     connecting to MySQL.
 
 ### Step 2: Create IAM Role for Lambda
 

@@ -101,7 +101,8 @@ After successful deployment:
    GRANT SELECT ON information_schema.* TO 'lambda_perf_schema'@'%';
    FLUSH PRIVILEGES;
    ```
-3. Reboot your database instance
+3. **Add an inbound rule on the RDS/Aurora security group to allow TCP 3306 from the Lambda security group ID output by the stack (e.g. `nr-mysql-ps-lambda-sg`).**
+4. Reboot your database instance
 4. Check CloudWatch logs to verify successful execution
 
 ## Updating the Stack

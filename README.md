@@ -35,7 +35,8 @@ For specialized needs beyond what Performance Insights provides, use the Lambda 
 
 1. **Deploy the automation** using CloudFormation or Terraform
 2. **Create database user** with Performance Schema permissions
-3. **Configure target state** using the YAML configuration file
+3. **Add an inbound rule on the RDS/Aurora security group to allow TCP 3306 from the Lambda security group ID output by the stack (e.g. `nr-mysql-ps-lambda-sg`).**
+4. **Configure target state** using the YAML configuration file
 
 Detailed instructions for both approaches are available in our [Implementation Guide](docs/02-implementation.md).
 
