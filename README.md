@@ -47,6 +47,8 @@ Detailed instructions for both approaches are available in our [Implementation G
 | [Strategy Guide](docs/01-strategy.md) | Decision tree and approach selection |
 | [Implementation Guide](docs/02-implementation.md) | Step-by-step implementation instructions |
 | [Troubleshooting Guide](docs/03-troubleshooting.md) | Solutions for common issues |
+| [Performance Insights Guide](docs/pi.md) | Detailed guide for AWS Performance Insights setup |
+| [Lambda Automation Guide](docs/lambda.md) | In-depth guide for the Lambda automation approach |
 | [CloudFormation Deployment](cloudformation/README.md) | CloudFormation template details |
 | [Terraform Deployment](terraform/README.md) | Terraform module usage |
 | [SQL Configuration](sql/README.md) | Understanding and customizing the target configuration |

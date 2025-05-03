@@ -123,4 +123,4 @@ echo "4. View database metrics in New Relic and AWS Performance Insights dashboa
 echo "   AWS Console: https://console.aws.amazon.com/rds/home?region=${REGION:-us-east-1}#performance-insights-v2:dashboard"
 echo ""
 echo "For more detailed configuration options, see our documentation:"
-echo "  docs/performance-insights-guide.md"
+echo "  docs/pi.md"

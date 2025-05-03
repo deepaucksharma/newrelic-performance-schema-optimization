@@ -25,3 +25,9 @@ We offer a comprehensive approach with multiple layers of configuration:
 3. Consult the [Troubleshooting Guide](03-troubleshooting.md) if you encounter any issues
 
 For most users, enabling AWS Performance Insights is the simplest and most effective approach, with the Lambda automation serving as an optional supplement for specialized monitoring requirements.
+
+## Further Reading
+
+* [Performance Insights Guide](pi.md) - Detailed instructions for AWS Performance Insights setup
+* [Lambda Automation Guide](lambda.md) - In-depth guide for the Lambda automation approach
+* [Automation Strategy Comparison](automation-comparison.md) - Compare different automation approaches
