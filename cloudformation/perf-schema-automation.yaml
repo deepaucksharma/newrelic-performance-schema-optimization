@@ -31,6 +31,12 @@ Parameters:
     Type: String
     Description: "S3 bucket for YAML configuration and Lambda code"
 
+  CreateBucket:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: "Whether to create the S3 bucket (true) or use an existing one (false)"
+
   SqlKey:
     Type: String
     Default: "target-config.yaml"
@@ -39,6 +45,10 @@ Parameters:
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: "VPC where Lambda will run (must have access to RDS/Aurora)"
+
+  VpcCidr:
+    Type: String
+    Description: "CIDR block of the VPC (used to restrict Lambda egress)"
 
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
@@ -88,6 +98,19 @@ Resources:
         performance-schema-max-sql-text-length: "4096"
         performance-schema-consumer-events-statements-current: "1"
 
+  # 1.5. S3 Bucket (conditional)
+  ConfigBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateBucket
+    Properties:
+      BucketName: !Ref SqlBucket
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
   # 2. Lambda layer (Python libraries)
   PyLayer:
     Type: AWS::Lambda::LayerVersion
@@ -105,7 +128,7 @@ Resources:
       GroupDescription: "New Relic Performance Schema Lambda outbound traffic"
       VpcId: !Ref VpcId
       SecurityGroupEgress:
-        - CidrIp: 0.0.0.0/0
+        - CidrIp: !Ref VpcCidr
           IpProtocol: tcp
           FromPort: !Ref DBPort
           ToPort: !Ref DBPort
@@ -135,7 +158,7 @@ Resources:
                 Action:
                   - rds:DescribeDBInstances
                   - rds:DescribeDBClusters
-                Resource: "*"
+                Resource: !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:*"
               - Effect: Allow
                 Action: rds-db:connect
                 Resource: !Sub "arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:*/${DBUser}"
@@ -262,6 +285,7 @@ Resources:
 
 Conditions:
   UseSecretManager: !Not [!Equals [!Ref DBSecretArn, ""]]
+  CreateBucket: !Equals [!Ref CreateBucket, "true"]
 
 Outputs:
   ParameterGroupName:

@@ -12,6 +12,9 @@ provider "aws" {
   region = "us-east-1" # Change to your region
 }
 
+# Get current AWS account ID for ARN scoping
+data "aws_caller_identity" "current" {}
+
 locals {
   use_secret_manager = var.db_secret_arn != "" && var.use_iam_auth == false
 }
@@ -45,6 +48,34 @@ resource "aws_db_parameter_group" "perf_schema" {
   tags = var.tags
 }
 
+# 1.5 S3 Bucket with versioning and encryption
+resource "aws_s3_bucket" "config_bucket" {
+  bucket = var.create_bucket ? var.sql_bucket : null
+  count  = var.create_bucket ? 1 : 0
+  
+  tags = var.tags
+}
+
+resource "aws_s3_bucket_versioning" "config_bucket_versioning" {
+  count  = var.create_bucket ? 1 : 0
+  bucket = var.create_bucket ? aws_s3_bucket.config_bucket[0].id : var.sql_bucket
+  
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "config_bucket_encryption" {
+  count  = var.create_bucket ? 1 : 0
+  bucket = var.create_bucket ? aws_s3_bucket.config_bucket[0].id : var.sql_bucket
+  
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 # 2. Lambda Layer
 resource "aws_lambda_layer_version" "pymysql_layer" {
   layer_name = "${var.prefix}-pymysql-layer"
@@ -66,7 +97,7 @@ resource "aws_security_group" "lambda_sg" {
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [var.vpc_cidr]  # Restrict to VPC CIDR block
   }
 
   tags = merge(var.tags, {
@@ -111,12 +142,12 @@ resource "aws_iam_policy" "lambda_rds_access" {
           "rds:DescribeDBInstances",
           "rds:DescribeDBClusters"
         ]
-        Resource = "*"
+        Resource = "arn:aws:rds:*:${data.aws_caller_identity.current.account_id}:*"
       },
       {
         Effect   = "Allow"
         Action   = "rds-db:connect"
-        Resource = "arn:aws:rds-db:*:*:dbuser:*/${var.db_user}"
+        Resource = "arn:aws:rds-db:*:${data.aws_caller_identity.current.account_id}:dbuser:*/${var.db_user}"
       }
     ]
   })

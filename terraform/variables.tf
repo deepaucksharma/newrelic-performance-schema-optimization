@@ -30,6 +30,12 @@ variable "sql_bucket" {
   type        = string
 }
 
+variable "create_bucket" {
+  description = "Whether to create the S3 bucket (true) or use an existing one (false)"
+  type        = bool
+  default     = false
+}
+
 variable "sql_key" {
   description = "S3 key for YAML configuration file"
   type        = string
@@ -50,6 +56,11 @@ variable "lambda_layer_key" {
 
 variable "vpc_id" {
   description = "VPC where Lambda will run (must have access to RDS/Aurora)"
+  type        = string
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block of the VPC (used to restrict Lambda egress)"
   type        = string
 }
 
