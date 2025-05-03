@@ -110,6 +110,75 @@ You only need runtime configuration automation if:
 2. You need to enable specific instruments or consumers not activated by PI
 3. You have specialized monitoring requirements beyond standard PI configuration
 
+## Using Lambda with AWS Performance Insights
+
+When you enable **Performance Insights (PI)** on an RDS/Aurora MySQL instance, PI can either **manage the Performance Schema (P\_S) for you ("Auto mode")** or simply **read whatever configuration you supply ("Manual mode")**.  
+Because our Lambda also updates `performance_schema.setup_*` tables at runtime, you **must choose one of two coexistence models** to avoid configuration thrashing:
+
+> For a comprehensive deep dive on this topic, see [Performance Insights and Lambda Automation Coexistence](04-pi-lambda-coexistence.md)
+
+### Option A – PI in **Manual Mode** (Recommended)
+* **What it is** – PI collects metrics but **does not change** P\_S settings. You set the whole desired state via Parameter Group **plus** the Lambda's `target-config.yaml`. PI becomes a passive observer.  
+* **How to enable** – When you turn PI on (console or CLI), un-tick **"Manage the Performance Schema"** or choose **Manual** in the drop-down. PI docs call this the *Manual Management* workflow.
+  * **CLI/IaC tip** – The mode is implicit: if parameter-group values already activate P\_S, PI leaves them untouched.
+* **Pros** – Single source of truth; zero conflict; lets you fine-tune consumers/instruments for New Relic without PI re-enabling noisy items.
+* **Cons** – You **must** include every consumer/instrument PI needs (statement & digest collectors, waits it charts, etc.) in `target-config.yaml`, or PI graphs will show gaps. A verification query is provided below.
+
+#### Quick checklist
+```bash
+# 1) PI enabled in Manual mode (console) or via CLI with no extra flags
+aws rds modify-db-instance --db-instance-identifier <id> \
+  --enable-performance-insights --apply-immediately
+
+# 2) Your Parameter Group keeps performance_schema=1 etc.
+# 3) Lambda target-config.yaml covers at least:
+#    consumers_enabled:
+#      - events_statements_history
+#      - statements_digest
+#    instruments_enabled_prefixes:
+#      - statement/%
+# 4) Re-deploy Lambda & reboot DB
+```
+
+### Option B – PI in Auto Mode with a Compatible Lambda Config
+* **What it is** – PI dynamically toggles the subset of P_S it needs; Lambda must avoid touching the same rows or set them to the identical value PI expects. PI doc list of auto-managed items: statement digests, several waits, thread instrumentation, etc.
+* **Implementation guidance**:
+  1. Discover PI's footprint by enabling PI alone for a few minutes and querying:
+
+```sql
+SELECT NAME, ENABLED FROM performance_schema.setup_consumers
+WHERE ENABLED='YES';
+```
+
+  2. Save the list.
+  3. Craft target-config.yaml excluding those consumers/instruments or matching them exactly.
+  4. Use instruments_disabled_prefixes only for groups you verified PI never turns back on (e.g., wait/sync/%).
+* **Risks** – If PI enables something your Lambda disables (or vice-versa) the tables can flip every few minutes ("flapping"). That churn adds overhead and may hide query samples.
+* **When to consider** – You only need Lambda for a tiny supplemental set (e.g., custom I/O waits) and accept some volatility.
+
+### Comparing the two models
+| Characteristic | PI Manual Mode + Lambda | PI Auto Mode + Lambda |
+|----------------|------------------------|------------------------|
+| Authority over P_S | Parameter Group + Lambda (single source) | Shared (PI + Lambda) |
+| Predictability | High | Medium/Low |
+| Conflict risk | Low | High |
+| User effort | Must configure PI needs manually | Must research PI behaviour; ongoing watch |
+| Recommended? | Yes – default | Only for niche, low-impact tweaks |
+
+### Verifying success (Manual-mode example)
+```sql
+-- All should be YES
+SELECT NAME, ENABLED
+FROM performance_schema.setup_consumers
+WHERE NAME IN ('events_statements_history','statements_digest');
+
+-- Confirm Lambda-only instruments are enabled and PI's set remains YES
+SELECT NAME, ENABLED, TIMED
+FROM performance_schema.setup_instruments
+WHERE NAME LIKE 'statement/%'
+LIMIT 10;
+```
+
 ### Target Configuration
 
 The Lambda uses a YAML file to specify the desired Performance Schema state:

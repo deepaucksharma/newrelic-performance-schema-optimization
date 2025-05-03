@@ -7,6 +7,7 @@
 - Performance Insights as recommended primary approach
 - Decision tree for guiding users to the optimal solution
 - Enhanced troubleshooting for Performance Insights
+- Comprehensive section on running Lambda automation alongside Performance Insights, covering Manual-mode vs Auto-mode, trade-offs, and precise implementation steps
 
 ### Changed
 - Consolidated overlapping guides into a single coherent structure

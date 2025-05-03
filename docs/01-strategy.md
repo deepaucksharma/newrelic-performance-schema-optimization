@@ -20,7 +20,7 @@ flowchart TD
 |-------------|---------------------|
 | **Standard monitoring needs** | Start with **AWS Performance Insights** (PI) as primary solution |
 | **PI not available** or **Enhanced granularity needed** | Use **Lambda Automation** approach |
-| **Very large or complex workloads** | Use **PI + Parameter Group + Lambda** for comprehensive coverage |
+| **Very large or complex workloads** | Use **PI + Parameter Group + Lambda** for comprehensive coverage (see [Using Lambda with Performance Insights](02-implementation.md#using-lambda-with-aws-performance-insights)) |
 
 > **New for 2025**: For most MySQL on AWS deployments, Performance Insights provides the simplest path to effective monitoring with minimal overhead. The Lambda automation approach should be considered complementary for specialized use cases.
 
