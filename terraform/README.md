@@ -128,6 +128,13 @@ After successful deployment:
    FLUSH PRIVILEGES;
    ```
 3. **Add an inbound rule on the RDS/Aurora security group to allow TCP 3306 from the Lambda security group ID output by the stack (e.g. `nr-mysql-ps-lambda-sg`).**
+   ```bash
+   # Using AWS CLI to add the inbound rule
+   aws ec2 authorize-security-group-ingress \
+     --group-id <your-db-security-group-id> \
+     --protocol tcp --port 3306 \
+     --source-group $(terraform output -raw security_group_id)
+   ```
 4. Reboot your database instance
 4. Check CloudWatch logs to verify successful execution
 

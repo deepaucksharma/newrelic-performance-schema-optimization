@@ -268,7 +268,43 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt RDSEventsRule.Arn
 
-  # 9. CloudWatch Alarms (optional)
+  # 8. CloudWatch Metrics and Alarms
+  LambdaDriftMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LambdaLogGroup
+      FilterPattern: '{ $.drift_detected = true }'
+      MetricTransformations:
+        - MetricName: DriftDetected
+          MetricNamespace: "NR/PerfSchema"
+          MetricValue: "1"
+          DefaultValue: 0
+
+  LambdaErrorMetric:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref LambdaLogGroup
+      FilterPattern: '{ $.error != "" }'
+      MetricTransformations:
+        - MetricName: ErrorDetected
+          MetricNamespace: "NR/PerfSchema"
+          MetricValue: "1"
+          DefaultValue: 0
+
+  LambdaDriftAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${Prefix}-drift-detected"
+      AlarmDescription: "Alert when Performance Schema configuration drift is detected multiple times"
+      MetricName: DriftDetected
+      Namespace: "NR/PerfSchema"
+      Statistic: Sum
+      Period: 86400  # 1 day
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
   LambdaErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:

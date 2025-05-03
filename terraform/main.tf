@@ -15,8 +15,14 @@ provider "aws" {
 # Get current AWS account ID for ARN scoping
 data "aws_caller_identity" "current" {}
 
+# Get VPC details for automatic CIDR detection
+data "aws_vpc" "selected" {
+  id = var.vpc_id
+}
+
 locals {
   use_secret_manager = var.db_secret_arn != "" && var.use_iam_auth == false
+  vpc_cidr_block = var.vpc_cidr != "" ? var.vpc_cidr : data.aws_vpc.selected.cidr_block
 }
 
 # 1. Parameter Group (baseline)
@@ -81,7 +87,7 @@ resource "aws_security_group" "lambda_sg" {
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]  # Restrict to VPC CIDR block
+    cidr_blocks = [local.vpc_cidr_block]  # Use automatically detected VPC CIDR if not provided
   }
 
   tags = merge(var.tags, {
@@ -294,6 +300,50 @@ resource "aws_lambda_permission" "rds_events_permission" {
   function_name = aws_lambda_function.perf_schema_fn.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.rds_events.arn
+}
+
+# 8. CloudWatch Metrics and Alarms
+resource "aws_cloudwatch_log_metric_filter" "lambda_drift_metric" {
+  name           = "${var.prefix}-drift-detected"
+  pattern        = "{ $.drift_detected = true }"
+  log_group_name = aws_cloudwatch_log_group.lambda_logs.name
+
+  metric_transformation {
+    name      = "DriftDetected"
+    namespace = "NR/PerfSchema"
+    value     = "1"
+    default_value = 0
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "lambda_error_metric" {
+  name           = "${var.prefix}-error-detected"
+  pattern        = "{ $.error != \"\" }"
+  log_group_name = aws_cloudwatch_log_group.lambda_logs.name
+
+  metric_transformation {
+    name      = "ErrorDetected"
+    namespace = "NR/PerfSchema"
+    value     = "1"
+    default_value = 0
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "lambda_drift_alarm" {
+  count               = var.create_alarms ? 1 : 0
+  alarm_name          = "${var.prefix}-drift-detected"
+  alarm_description   = "Alert when Performance Schema configuration drift is detected multiple times"
+  
+  metric_name         = "DriftDetected"
+  namespace           = "NR/PerfSchema"
+  statistic           = "Sum"
+  period              = 86400  # 1 day
+  evaluation_periods  = 2
+  threshold           = 1
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  
+  tags = var.tags
 }
 
 # 9. CloudWatch Alarms (optional)

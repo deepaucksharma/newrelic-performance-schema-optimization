@@ -11,6 +11,9 @@ from botocore.config import Config
 LOG = logging.getLogger()
 LOG.setLevel(logging.INFO)
 
+# Global connection cache for reuse across Lambda invocations
+CONN = None
+
 S3_BUCKET = os.environ["SQL_BUCKET"]
 S3_KEY    = os.environ["SQL_KEY"]
 DB_ID     = os.environ["DB_ID"]
@@ -99,6 +102,23 @@ def _connect():
                            read_timeout=10,
                            ssl=ssl_cfg)
 
+def _connect_cached():
+    """Return a cached DB connection if valid, or create a new one."""
+    global CONN
+    try:
+        # Check if we have a valid connection
+        if CONN and CONN.open:
+            # Ping with reconnect if needed
+            CONN.ping(reconnect=True)
+            return CONN
+    except Exception as e:
+        LOG.info(f"Connection reuse failed, creating new connection: {str(e)}")
+        # Fall through to creating a new connection
+    
+    # Create a new connection
+    CONN = _connect()
+    return CONN
+
 def _current_state(cur):
     """Get current Performance Schema state."""
     cur.execute("SELECT NAME, ENABLED FROM performance_schema.setup_consumers")
@@ -163,7 +183,7 @@ def lambda_handler(event, _):
     
     try:
         target = _get_target_yaml()
-        con = _connect()
+        con = _connect_cached()
         with con.cursor() as cur:
             current = _current_state(cur)
             updates = _diff(target, current)

@@ -60,9 +60,9 @@ variable "vpc_id" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block allowed for Lambda egress; default open."
+  description = "CIDR block allowed for Lambda egress; empty uses VPC CIDR automatically"
   type        = string
-  default     = "0.0.0.0/0"
+  default     = ""  # No open-egress by accident, will use VPC CIDR if empty
 }
 
 variable "subnet_ids" {
