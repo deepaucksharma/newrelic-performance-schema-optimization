@@ -2,7 +2,7 @@
 Lambda: enforce Performance-Schema desired state on RDS/Aurora for New Relic monitoring.
 Runtime: python3.12
 """
-import json, os, time, logging, yaml, hashlib
+import json, os, time, logging, yaml, hashlib, re
 import boto3, pymysql
 from botocore.exceptions import ClientError
 from botocore.config import Config
@@ -18,6 +18,10 @@ IAM_AUTH  = os.environ["IAM_AUTH"]  == "true"
 DB_USER   = os.environ.get("DB_USER", "lambda_perf_schema")
 DB_PORT   = int(os.environ.get("DB_PORT", "3306"))
 NR_ACCOUNT = os.environ.get("NR_ACCOUNT", "")  # Optional New Relic account ID for logs
+
+# Regular expression for validating Performance Schema object names
+# Only alphanumerics, underscores, forward slashes, and percent signs are allowed
+SAFE_PATTERN = re.compile(r'^[A-Za-z0-9_/%]+$')
 
 session = boto3.session.Session()
 REGION  = session.region_name
@@ -46,6 +50,25 @@ def _get_target_yaml():
     for k, t in expected_keys.items():
         if k not in target_raw or not isinstance(target_raw[k], t):
             raise ValueError(f"YAML missing or invalid key '{k}'")
+    
+    # --- Security validation - prevent SQL injection ----------------------
+    # Validate all string values against our safe pattern
+    for name in target_raw["consumers_enabled"]:
+        if not SAFE_PATTERN.fullmatch(name):
+            raise ValueError(f"Invalid consumer name: {name}")
+    
+    for prefix in target_raw["instruments_enabled_prefixes"]:
+        if not SAFE_PATTERN.fullmatch(prefix):
+            raise ValueError(f"Invalid instrument prefix: {prefix}")
+    
+    for name in target_raw["instruments_enabled_exact"]:
+        if not SAFE_PATTERN.fullmatch(name):
+            raise ValueError(f"Invalid instrument name: {name}")
+    
+    for prefix in target_raw["instruments_disabled_prefixes"]:
+        if not SAFE_PATTERN.fullmatch(prefix):
+            raise ValueError(f"Invalid instrument prefix: {prefix}")
+            
     return target_raw
 
 def _rds_endpoint():
@@ -91,27 +114,34 @@ def _current_state(cur):
 
 def _diff(target, current):
     """Calculate the SQL commands needed to bring current state to match target state."""
-    sql = []
+    sql_params = []
     # consumers
     for name in target["consumers_enabled"]:
         if current[0].get(name) != "YES":
-            sql.append(f"UPDATE performance_schema.setup_consumers "
-                       f"SET ENABLED='YES' WHERE NAME='{name}'")
+            sql_params.append({
+                "sql": "UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME=%s",
+                "params": (name,)
+            })
     # instruments enabled by prefix
     for prefix in target["instruments_enabled_prefixes"]:
-        sql.append(f"UPDATE performance_schema.setup_instruments "
-                   f"SET ENABLED='YES', TIMED='YES' "
-                   f"WHERE NAME LIKE '{prefix}'")
+        sql_params.append({
+            "sql": "UPDATE performance_schema.setup_instruments SET ENABLED='YES', TIMED='YES' WHERE NAME LIKE %s",
+            "params": (prefix,)
+        })
     # exact enables
     for name in target["instruments_enabled_exact"]:
         if current[1].get(name, ("NO","NO")) != ("YES","YES"):
-            sql.append(f"UPDATE performance_schema.setup_instruments "
-                       f"SET ENABLED='YES', TIMED='YES' WHERE NAME='{name}'")
+            sql_params.append({
+                "sql": "UPDATE performance_schema.setup_instruments SET ENABLED='YES', TIMED='YES' WHERE NAME=%s",
+                "params": (name,)
+            })
     # disables
     for prefix in target["instruments_disabled_prefixes"]:
-        sql.append(f"UPDATE performance_schema.setup_instruments "
-                   f"SET ENABLED='NO', TIMED='NO' WHERE NAME LIKE '{prefix}'")
-    return sql
+        sql_params.append({
+            "sql": "UPDATE performance_schema.setup_instruments SET ENABLED='NO', TIMED='NO' WHERE NAME LIKE %s",
+            "params": (prefix,)
+        })
+    return sql_params
 
 def lambda_handler(event, _):
     """Main Lambda handler function."""
@@ -139,8 +169,8 @@ def lambda_handler(event, _):
             if updates:
                 LOG.info(f"Applying {len(updates)} updates to Performance Schema")
                 con.begin()
-                for stmt in updates:
-                    cur.execute(stmt)
+                for sql_param in updates:
+                    cur.execute(sql_param["sql"], sql_param["params"])
                 con.commit()
                 result["patch_applied"] = True
                 
@@ -148,8 +178,10 @@ def lambda_handler(event, _):
                 post_current = _current_state(cur)
                 post_updates = _diff(target, post_current)
                 result["verification_success"] = len(post_updates) == 0
-                
-        LOG.info(json.dumps(result))
+        
+        # Redact sensitive fields from logs
+        log_safe_result = {k: v for k, v in result.items() if k not in ("error", "database")}
+        LOG.info(json.dumps(log_safe_result))
     except Exception as exc:
         # Roll back any open transaction just in case
         try:
