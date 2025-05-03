@@ -28,7 +28,6 @@ resource "aws_db_parameter_group" "perf_schema" {
   parameter { name = "performance_schema"                                      value = "1"      }
   parameter { name = "performance_schema_digests_size"                        value = "10000"  }
   parameter { name = "performance_schema_max_sql_text_length"                 value = "4096"   }
-  parameter { name = "performance_schema_consumer_events_statements_current"  value = "1"      }
 
   tags = var.tags
 }
