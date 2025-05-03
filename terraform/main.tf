@@ -50,15 +50,15 @@ resource "aws_db_parameter_group" "perf_schema" {
 
 # 1.5 S3 Bucket with versioning and encryption
 resource "aws_s3_bucket" "config_bucket" {
-  bucket = var.create_bucket ? var.sql_bucket : null
   count  = var.create_bucket ? 1 : 0
+  bucket = var.sql_bucket
   
   tags = var.tags
 }
 
 resource "aws_s3_bucket_versioning" "config_bucket_versioning" {
   count  = var.create_bucket ? 1 : 0
-  bucket = var.create_bucket ? aws_s3_bucket.config_bucket[0].id : var.sql_bucket
+  bucket = aws_s3_bucket.config_bucket[0].id
   
   versioning_configuration {
     status = "Enabled"
@@ -67,7 +67,7 @@ resource "aws_s3_bucket_versioning" "config_bucket_versioning" {
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "config_bucket_encryption" {
   count  = var.create_bucket ? 1 : 0
-  bucket = var.create_bucket ? aws_s3_bucket.config_bucket[0].id : var.sql_bucket
+  bucket = aws_s3_bucket.config_bucket[0].id
   
   rule {
     apply_server_side_encryption_by_default {

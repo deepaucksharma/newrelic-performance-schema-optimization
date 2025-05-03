@@ -60,8 +60,9 @@ variable "vpc_id" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block of the VPC (used to restrict Lambda egress)"
+  description = "CIDR block allowed for Lambda egress; default open."
   type        = string
+  default     = "0.0.0.0/0"
 }
 
 variable "subnet_ids" {
