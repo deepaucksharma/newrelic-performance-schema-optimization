@@ -323,6 +323,7 @@ resource "aws_cloudwatch_log_metric_filter" "lambda_error_metric" {
   name           = "${var.prefix}-error-detected"
   pattern        = "{ $.error != \"\" }"
   log_group_name = aws_cloudwatch_log_group.lambda_logs.name
+  # Tip: uncomment the "had_error" line in lambda/index.py to emit a single boolean flag
 
   metric_transformation {
     name      = "ErrorDetected"

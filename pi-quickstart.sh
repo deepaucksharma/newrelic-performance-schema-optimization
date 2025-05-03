@@ -81,6 +81,7 @@ fi
 
 echo "Performance Insights enabled successfully!"
 echo "Retention period: $RETENTION days"
+# NOTE: >7-day retention incurs additional PI charges
 
 # Update New Relic configuration if path provided
 if [ -n "$NR_CONFIG_PATH" ]; then

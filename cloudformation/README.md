@@ -53,6 +53,8 @@ aws cloudformation deploy \
       SqlKey=target-config.yaml \
       VpcId=vpc-xxxxx \
       SubnetIds='["subnet-xxxxx","subnet-yyyyy"]' \
+      # Optional when you want locked-down egress
+      VpcCidr=$VpcCidr \
       UseIamAuth=true \
       NewRelicAccountId=YOUR-NR-ACCOUNT
 ```
@@ -111,7 +113,8 @@ After successful deployment:
      --group-id <your-db-security-group-id> \
      --protocol tcp --port 3306 \
      --source-group $(aws cloudformation describe-stacks --stack-name nr-perf-schema-optimizer \
-       --query "Stacks[0].Outputs[?OutputKey=='SecurityGroupId'].OutputValue" --output text)
+       --query "Stacks[0].Outputs[?OutputKey=='LambdaSecurityGroupId'].OutputValue" --output text)
+   # If you exposed LambdaSecurityGroupId (see template output section)
    ```
 4. Reboot your database instance
 4. Check CloudWatch logs to verify successful execution

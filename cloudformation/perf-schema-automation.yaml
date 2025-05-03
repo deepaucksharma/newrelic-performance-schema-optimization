@@ -50,6 +50,7 @@ Parameters:
     Type: String
     Description: "CIDR block of the VPC (used to restrict Lambda egress)"
     # Leave empty to default to your VPC's CIDR (see README tip)
+    # Supply '<vpc-cidr>' (or /32) – empty string will break SG egress
 
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
@@ -293,6 +294,7 @@ Resources:
           MetricNamespace: "NR/PerfSchema"
           MetricValue: "1"
           DefaultValue: 0
+      # Tip: uncomment the "had_error" line in lambda/index.py to emit a single boolean flag
 
   LambdaDriftAlarm:
     Type: AWS::CloudWatch::Alarm

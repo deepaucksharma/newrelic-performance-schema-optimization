@@ -143,7 +143,7 @@ Ensure your Lambda function can access your RDS/Aurora database:
    - **Lambda security group** (`${Prefix}-lambda-sg`): outbound TCP 3306 to the VPC.
    - **Database security group**: **add an *inbound* rule for TCP 3306 whose
      *source* is the Lambda security-group ID** (see the stack output
-     `LambdaSecurityGroupId` or Terraform *security_group_id* output).  Without this rule the Lambda will time-out when
+     **LambdaSecurityGroupId** (or Terraform *security_group_id*)).  Without this rule the Lambda will time-out when
      connecting to MySQL.
 
 ### Step 2: Create IAM Role for Lambda
