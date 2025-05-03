@@ -50,6 +50,7 @@ Detailed instructions for both approaches are available in our [Implementation G
 | [Troubleshooting Guide](docs/03-troubleshooting.md) | Solutions for common issues |
 | [Performance Insights Guide](docs/pi.md) | Detailed guide for AWS Performance Insights setup |
 | [Lambda Automation Guide](docs/lambda.md) | In-depth guide for the Lambda automation approach |
+| **NEW ▶︎** [PI + Lambda Coexistence](docs/04-pi-lambda-coexistence.md) | How to run both safely |
 | [CloudFormation Deployment](cloudformation/README.md) | CloudFormation template details |
 | [Terraform Deployment](terraform/README.md) | Terraform module usage |
 | [SQL Configuration](sql/README.md) | Understanding and customizing the target configuration |
@@ -61,6 +62,8 @@ For most MySQL/Aurora workloads on AWS, we recommend:
 1. **Start with Performance Insights** for simple, managed Performance Schema configuration
 2. **Add Parameter Group settings** for optimizing buffer sizes and specific flags
 3. **Use Lambda automation** only for specialized monitoring needs not covered by PI
+
+> **Need both at once?**  Read [PI + Lambda Coexistence](docs/04-pi-lambda-coexistence.md) for the two supported models ("PI Manual" vs "Compatible Config") and a printable checklist.
 
 See our [Strategy Guide](docs/01-strategy.md) for detailed recommendations.
 

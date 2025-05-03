@@ -22,6 +22,12 @@ flowchart TD
 | **PI not available** or **Enhanced granularity needed** | Use **Lambda Automation** approach |
 | **Very large or complex workloads** | Use **PI + Parameter Group + Lambda** for comprehensive coverage (see [Using Lambda with Performance Insights](02-implementation.md#using-lambda-with-aws-performance-insights)) |
 
+### Where the new Coexistence Guide fits
+If you land on the *"PI + Lambda Automation"* branch of the decision tree, jump straight to [04-pi-lambda-coexistence.md](04-pi-lambda-coexistence.md). It walks through:
+* How PI decides between **automatic** and **manual** Performance Schema management according to AWS documentation
+* Exact SQL probes to confirm which mode you're in as recommended in AWS documentation
+* The two supported coexistence models (Manual-mode vs Compatible Config) and their trade-offs.
+
 > **New for 2025**: For most MySQL on AWS deployments, Performance Insights provides the simplest path to effective monitoring with minimal overhead. The Lambda automation approach should be considered complementary for specialized use cases.
 
 ## Introduction
