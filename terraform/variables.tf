@@ -100,7 +100,7 @@ variable "create_alarms" {
 variable "log_retention_days" {
   description = "Number of days to retain Lambda logs"
   type        = number
-  default     = 14    # overridable, exposed to match CFN parameter
+  default     = 30    # Aligned with CloudFormation default of 30 days
 }
 
 # --- NEW ---
