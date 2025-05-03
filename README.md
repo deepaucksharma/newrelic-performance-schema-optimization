@@ -50,7 +50,7 @@ Detailed instructions for both approaches are available in our [Implementation G
 | [Troubleshooting Guide](docs/03-troubleshooting.md) | Solutions for common issues |
 | [Performance Insights Guide](docs/pi.md) | Detailed guide for AWS Performance Insights setup |
 | [Lambda Automation Guide](docs/lambda.md) | In-depth guide for the Lambda automation approach |
-| **NEW ▶︎** [PI + Lambda Coexistence](docs/04-pi-lambda-coexistence.md) | How to run both safely |
+| [PI + Lambda Coexistence](docs/04-pi-lambda-coexistence.md) | How to run both safely |
 | [CloudFormation Deployment](cloudformation/README.md) | CloudFormation template details |
 | [Terraform Deployment](terraform/README.md) | Terraform module usage |
 | [SQL Configuration](sql/README.md) | Understanding and customizing the target configuration |
