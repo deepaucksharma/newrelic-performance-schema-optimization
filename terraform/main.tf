@@ -23,22 +23,22 @@ resource "aws_db_parameter_group" "perf_schema" {
   description = "New Relic optimized Performance Schema baseline"
 
   parameter {
-    name  = "performance_schema"
+    name  = "performance-schema"
     value = "1"
   }
 
   parameter {
-    name  = "performance_schema_digests_size"
+    name  = "performance-schema-digests-size"
     value = "10000"
   }
 
   parameter {
-    name  = "performance_schema_max_sql_text_length"
+    name  = "performance-schema-max-sql-text-length"
     value = "4096"
   }
 
   parameter {
-    name  = "performance_schema_consumer_events_statements_current"
+    name  = "performance-schema-consumer-events-statements-current"
     value = "1"
   }
 
@@ -205,6 +205,10 @@ resource "aws_lambda_function" "perf_schema_fn" {
       NR_ACCOUNT = var.new_relic_account_id
       SECRET_ARN = var.db_secret_arn
     }
+  }
+  
+  lifecycle {
+    ignore_changes = [s3_key] # Prevents recreation when you just upload a new ZIP under the same key
   }
   
   tags = var.tags

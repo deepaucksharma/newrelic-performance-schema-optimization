@@ -76,6 +76,7 @@ def _connect():
                            password=pwd,
                            port=DB_PORT,
                            connect_timeout=10,
+                           read_timeout=10,
                            ssl=ssl_cfg or True)
 
 def _current_state(cur):

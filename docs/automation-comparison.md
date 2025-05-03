@@ -1,5 +1,7 @@
 # Automation Strategy Comparison for Performance Schema Management
 
+> **Note**: This is an appendix document. For the main documentation flow, please start with [00-overview.md](00-overview.md).
+
 ## Overview
 
 This document compares different approaches for automating Performance Schema (P_S) configuration on AWS RDS/Aurora. Each approach has different trade-offs in terms of implementation complexity, security, reliability, and operational overhead.
