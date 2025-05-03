@@ -4,6 +4,8 @@
 --
 -- PRIMARY RECOMMENDATION: Use AWS Performance Insights as your foundation,
 -- and apply these configurations only as needed for specialized requirements.
+--
+-- Reminder: in RDS & Aurora parameter groups, use UNDERSCORES not hyphens
 
 -- =====================================================================
 -- 1. Database User Creation (Run as admin user)

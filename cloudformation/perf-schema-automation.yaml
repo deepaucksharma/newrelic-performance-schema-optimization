@@ -49,6 +49,7 @@ Parameters:
   VpcCidr:
     Type: String
     Description: "CIDR block of the VPC (used to restrict Lambda egress)"
+    # Leave empty to default to your VPC's CIDR (see README tip)
 
   SubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
@@ -100,6 +101,8 @@ Resources:
         performance_schema: "1"
         performance_schema_digests_size: "10000"
         performance_schema_max_sql_text_length: "4096"
+        # Uncomment to enlarge "history long" buffer if you need multi-minute query traces
+        # performance_schema_events_statements_history_long_size: "10000"
 
   # 1.5. S3 Bucket (conditional)
   ConfigBucket:
@@ -346,3 +349,8 @@ Outputs:
   DB_USER:
     Description: "Database user required for Lambda"
     Value: !Ref DBUser
+    
+  # --- OPTIONAL: surface SG so you can automate DB-SG ingress rules
+  # LambdaSecurityGroupId:
+  #   Description: "Security-group ID used by the Lambda function"
+  #   Value: !GetAtt FnSG.GroupId

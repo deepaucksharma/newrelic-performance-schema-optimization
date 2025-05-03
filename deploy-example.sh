@@ -48,6 +48,7 @@ if [ -z "$VPC_CIDR" ]; then
   VPC_CIDR=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" \
                --query 'Vpcs[0].CidrBlock' --output text)
   echo "Detected VPC CIDR: $VPC_CIDR"
+  # Tip: if you need a stricter egress, set VPC_CIDR to a /32 of the DB subnet instead.
 fi
 
 # 1. Build Lambda and dependencies

@@ -37,6 +37,9 @@ Before deploying the template:
 ### Using AWS CLI
 
 ```bash
+# Helper – grab the VPC CIDR so you can feed VpcCidr without hard-coding
+VpcCidr=$(aws ec2 describe-vpcs --vpc-ids <vpc-id> --query 'Vpcs[0].CidrBlock' --output text)
+
 aws cloudformation deploy \
   --template-file perf-schema-automation.yaml \
   --stack-name nr-perf-schema-optimizer \

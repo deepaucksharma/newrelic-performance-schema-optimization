@@ -51,3 +51,7 @@ lambda_function.zip
 
 # Logs
 *.log
+
+# Lambda build artefacts
+lambda/build/
+lambda/*.zip

@@ -63,6 +63,7 @@ variable "vpc_cidr" {
   description = "CIDR block allowed for Lambda egress; empty uses VPC CIDR automatically"
   type        = string
   default     = ""  # No open-egress by accident, will use VPC CIDR if empty
+  # Optional – leave "" to auto-detect using the selected VPC data-source
 }
 
 variable "subnet_ids" {

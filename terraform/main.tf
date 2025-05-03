@@ -34,6 +34,8 @@ resource "aws_db_parameter_group" "perf_schema" {
   parameter { name = "performance_schema"                                      value = "1"      }
   parameter { name = "performance_schema_digests_size"                        value = "10000"  }
   parameter { name = "performance_schema_max_sql_text_length"                 value = "4096"   }
+  # Uncomment to enlarge "history long" buffer if you need multi-minute query traces
+  # parameter { name = "performance_schema_events_statements_history_long_size" value = "10000"  }
 
   tags = var.tags
 }
@@ -88,6 +90,7 @@ resource "aws_security_group" "lambda_sg" {
     to_port     = 3306
     protocol    = "tcp"
     cidr_blocks = [local.vpc_cidr_block]  # Use automatically detected VPC CIDR if not provided
+    # using local.vpc_cidr_block means no accidental 0.0.0.0/0 if the caller forgets to set vpc_cidr
   }
 
   tags = merge(var.tags, {

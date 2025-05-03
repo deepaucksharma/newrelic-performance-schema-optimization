@@ -204,6 +204,8 @@ def lambda_handler(event, _):
         
         # Redact sensitive fields from logs
         log_safe_result = {k: v for k, v in result.items() if k not in ("error", "database")}
+        # Optional single-flag for CloudWatch Filters/Alarms
+        # log_safe_result["had_error"] = bool(result["error"])
         LOG.info(json.dumps(log_safe_result))
     except Exception as exc:
         if con:  # unconditional rollback when possible
