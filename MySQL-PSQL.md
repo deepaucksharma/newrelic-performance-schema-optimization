@@ -31,43 +31,51 @@
 How engine events become Performance Insights (PI) data points.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{ 'fontSize':'12px'}} }%%
 graph LR
+    %% ───────────── Application ─────────────
     subgraph "Application / Client"
-        A[(SQL Query)]
+        APP_SQL[(SQL Query)]
     end
 
+    %% ───────────── Engine Internals ─────────────
     subgraph "Engine Internals (Data Sources)"
         direction TB
-        E_MySQL(MySQL Engine Code):::mysql -- Instrumentation Hooks --> P1(Performance Schema):::mysql
-        P1 -- In-Memory Tables --> P1_Tables([P_S Tables<br/>+ sys Schema Views]):::mysql
+        MYSQL_CORE[/"MySQL Engine Code"/]:::mysql -->|Instrumentation Hooks| MYSQL_PS[["Performance Schema"]:::mysql]
+        MYSQL_PS -->|In-Memory Tables| MYSQL_PSTBL[["P_S Tables<br/>+ sys Views"]]:::mysql
 
-        E_PG(PostgreSQL Engine Code):::pg -- Native State --> P2(Core Stats Collector /<br/>pg_stat_activity):::pg
-        E_PG -- Extension Hooks --> X1(pg_stat_statements):::pg
-        E_PG -- Extension Hooks --> X2(pg_wait_sampling):::pg
+        PG_CORE[/"PostgreSQL Engine Code"/]:::pg -->|Native State| PG_STATCOL[["Stats Collector<br/>pg_stat_activity"]]:::pg
+        PG_CORE -->|Ext Hooks| PG_STMTS[["pg_stat_statements"]]:::pg
+        PG_CORE -->|Ext Hooks| PG_WSAMPLE[["pg_wait_sampling"]]:::pg
     end
 
-    subgraph "AWS Agent (On Host)"
-        P1_Tables ==> AG(PI / EM Agent):::agent
-        P2 ==> AG
-        X1 ==> AG
-        X2 -.->|PI Ignores This Data| AG_Note( )
+    %% ───────────── Host Agent ─────────────
+    subgraph "AWS Agent (on host)"
+        MYSQL_PSTBL ==> AGENT[["PI / EM Agent"]]:::agent
+        PG_STATCOL ==> AGENT
+        PG_STMTS ==> AGENT
+        PG_WSAMPLE -.-> IGNORED[/"PI does NOT query pg_wait_sampling"/]
     end
 
+    %% ───────────── AWS Services ─────────────
     subgraph "AWS Services (Aggregation / UI)"
-        AG -- Telemetry --> PI[AWS Performance Insights<br/>(DB Load, Waits, SQL)]:::svc
-        AG -- OS Metrics --> CW_EM(Enhanced Monitoring):::svc
-        E_MySQL -- Standard Metrics / Logs --> CW_Std(CloudWatch Metrics/Logs):::svc
-        E_PG -- Standard Metrics / Logs --> CW_Std
+        AGENT -- Telemetry --> PI_UI["Performance Insights"]:::svc
+        AGENT -- OS Metrics --> CW_EM["Enhanced Monitoring"]:::svc
+        MYSQL_CORE -- Std Metrics / Logs --> CW_STD["CloudWatch Metrics & Logs"]:::svc
+        PG_CORE   -- Std Metrics / Logs --> CW_STD
     end
 
-    A --> E_MySQL; A --> E_PG;
+    APP_SQL --> MYSQL_CORE
+    APP_SQL --> PG_CORE
 
-    classDef mysql fill:#4479AA,stroke:#333,color:#fff;  /* MySQL Blue */
-    classDef pg fill:#336791,stroke:#333,color:#fff;      /* PostgreSQL Blue */
-    classDef agent fill:#ededed,stroke:#333;
-    classDef svc fill:#f9f,stroke:#333;
-    linkStyle 5 stroke-dasharray: 5 5, stroke:#f55, stroke-width:2px;
-    style AG_Note fill:none,stroke:none; /* Hide placeholder node */
+    %% ───────────── Styling ─────────────
+    classDef mysql fill:#4479AA,stroke:#333,color:#fff;
+    classDef pg fill:#336791,stroke:#333,color:#fff;
+    classDef agent fill:#d3d3d3,stroke:#333,color:#000;
+    classDef svc fill:#f7c6ff,stroke:#333,color:#000;
+
+    linkStyle 11 stroke-dasharray:5 5,stroke:#d55,stroke-width:2px;
+
 ```
 
 <details open>
@@ -199,17 +207,18 @@ Estimate before enabling! Use CloudWatch/EM to verify post-change.
 <summary><b>Visual Budget Check (Example: Target < 15% Extra RAM, < 7% Extra CPU)</b></summary>
 
 ```mermaid
-graph TD
+%%{init: { 'theme':'base' }}%%
+flowchart LR
     subgraph "Estimated Overhead Budget"
-        RAM --> RGauge{Gauge};
-        CPU --> CGauge{Gauge};
+        RAM[RAM] -->|P_S RAM 12 %| RAM_LIMIT((15 % Limit))
+        CPU[CPU] -->|Total CPU 4 %| CPU_LIMIT((7 % Limit))
     end
-    style RGauge fill:#ddd,stroke:#333,stroke-width:2px; text-align:center;
-    style CGauge fill:#ddd,stroke:#333,stroke-width:2px; text-align:center;
-    RGauge -- "P_S RAM: 12%" --> RLimit((15% Limit));
-    CGauge -- "Total CPU: 4%" --> CLimit((7% Limit));
-    style RLimit fill:none,stroke:#0f0,stroke-width:3px;
-    style CLimit fill:none,stroke:#0f0,stroke-width:3px;
+
+    classDef ok fill:#e0ffe0,stroke:#1a9850,stroke-width:2px;
+    classDef warn fill:#ffe0e0,stroke:#d73027,stroke-width:2px;
+
+    class RAM_LIMIT,CPU_LIMIT ok
+
 ```
 
 (Replace values with your estimates. Use Red stroke for limit exceeded)
