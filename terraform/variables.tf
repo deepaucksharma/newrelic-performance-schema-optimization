@@ -60,10 +60,13 @@ variable "vpc_id" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block allowed for Lambda egress; empty uses VPC CIDR automatically"
+  description = <<-EOT
+  CIDR block allowed for Lambda egress to reach the database.
+  Leave empty ("") to default to the VPC's *primary* CIDR block.
+  If your VPC uses multiple CIDR blocks and the DB subnet sits in a secondary range, specify that range here (e.g. 10.1.0.0/16).
+  EOT
   type        = string
-  default     = ""  # No open-egress by accident, will use VPC CIDR if empty
-  # Optional – leave "" to auto-detect using the selected VPC data-source
+  default     = ""
 }
 
 variable "subnet_ids" {

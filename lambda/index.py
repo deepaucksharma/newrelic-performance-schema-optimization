@@ -72,6 +72,12 @@ def _get_target_yaml():
     for prefix in target_raw["instruments_disabled_prefixes"]:
         if not SAFE_PATTERN.fullmatch(prefix):
             raise ValueError(f"Invalid instrument prefix: {prefix}")
+    
+    # Validate that prefix wildcards end with %
+    for lst_name in ("instruments_enabled_prefixes", "instruments_disabled_prefixes"):
+        for p in target_raw[lst_name]:
+            if not p.endswith('%'):
+                raise ValueError(f"{lst_name} entry '{p}' must end with '%' for LIKE matching")
             
     return target_raw
 

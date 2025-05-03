@@ -121,4 +121,4 @@ SELECT 'Lost Instrumentation Check' AS check_name,
          ELSE 'OK: No lost instrumentation'
        END AS notes
 FROM performance_schema.global_status
-WHERE VARIABLE_NAME = 'performance_schema_digest_lost';
+WHERE VARIABLE_NAME = 'Performance_schema_digest_lost';
