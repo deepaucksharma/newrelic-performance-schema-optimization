@@ -1,126 +1,66 @@
-# Reliably Configuring MySQL Performance Schema on AWS RDS/Aurora for New Relic Monitoring
+# Optimizing MySQL Performance Schema for New Relic Monitoring on AWS
+
+This project provides solutions for reliable MySQL/Aurora Performance Schema configuration on AWS to ensure consistent New Relic monitoring.
 
 **The core problem**  
-`UPDATE` statements on `performance_schema.setup_*` tables are memory-only inside
-RDS/Aurora. After every reboot, fail-over or version upgrade they disappear, breaking
-New Relic monitoring and creating observation gaps.
+Performance Schema settings in MySQL/Aurora are reset after database restarts, failovers, and upgrades, causing monitoring gaps and inconsistent metrics collection in New Relic.
 
-**Solution in two layers**
+**Our solution: A layered approach**
 
-| Layer | Purpose | How we implement |
-|-------|---------|------------------|
-| **Parameter Group** | Persistent baseline: `performance_schema = 1`, buffer sizes, any consumer flags exposed by AWS | 1× DB parameter group per engine family |
-| **Lambda Automation** | Re-apply _all other_ consumer / instrument UPDATEs after every event & on a daily schedule | EventBridge rule → Lambda in VPC, IAM Auth, YAML target-state file in S3 |
+| Layer | Purpose | Implementation |
+|-------|---------|----------------|
+| **Performance Insights** | AWS-managed Performance Schema configuration that persists through restarts | Enable through AWS console or CLI |
+| **Parameter Group** | Persistent baseline settings: `performance_schema = 1`, buffer sizes | 1× DB parameter group per engine family |
+| **Lambda Automation** | Optional: Re-apply consumer/instrument settings after every restart | EventBridge → Lambda → RDS/Aurora |
 
-> **Benefits**   Consistent metrics · 40-70 % ingest savings · < 8 % CPU overhead · zero manual re-configuration
+> **Benefits:** Consistent metrics · 40-70% ingest savings · Minimal CPU overhead · Zero manual reconfiguration
 
-## Quick Start
+## Key Features
 
-### 1. Prepare S3 Storage
+- **AWS Performance Insights Integration**: Leverage AWS's built-in Performance Schema management
+- **Persistent Configuration**: Ensure monitoring continues after database restarts and failovers
+- **Optimized Metrics Collection**: Focus on high-value metrics while minimizing overhead
+- **Flexible Deployment Options**: Use CloudFormation or Terraform for automated deployment
+- **Comprehensive Documentation**: Clear guidance on implementation and troubleshooting
 
-Upload the Lambda code and configuration files:
+## Quickstart Guide
 
-```bash
-# Build Lambda package and layer
-cd lambda
-bash build.sh
+For most users, we recommend starting with AWS Performance Insights:
 
-# Upload files to S3
-aws s3 cp lambda.zip s3://YOUR-BUCKET/lambda.zip
-aws s3 cp pymysql-pyyaml-layer.zip s3://YOUR-BUCKET/pymysql-pyyaml-layer.zip
-aws s3 cp ../sql/target-config.yaml s3://YOUR-BUCKET/target-config.yaml
-```
+1. **Enable Performance Insights** in your RDS/Aurora console
+2. **Apply supplemental Parameter Group** settings for optimal New Relic integration
+3. **Configure New Relic** with appropriate database permissions
 
-### 2. Deploy Using CloudFormation or Terraform
+For specialized needs beyond what Performance Insights provides, use the Lambda automation:
 
-#### CloudFormation Deployment:
+1. **Deploy the automation** using CloudFormation or Terraform
+2. **Create database user** with Performance Schema permissions
+3. **Configure target state** using the YAML configuration file
 
-```bash
-aws cloudformation deploy \
-  --template-file cloudformation/perf-schema-automation.yaml \
-  --stack-name nr-perf-schema-optimizer \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides \
-      DatabaseId=YOUR-DB-ID \
-      IsAurora=false \
-      SqlBucket=YOUR-BUCKET \
-      SqlKey=target-config.yaml \
-      VpcId=vpc-xxxxx \
-      SubnetIds='["subnet-xxxxx","subnet-yyyyy"]' \
-      UseIamAuth=true \
-      NewRelicAccountId=YOUR-NR-ACCOUNT
-```
-
-#### Terraform Deployment:
-
-```bash
-cd terraform
-terraform init
-terraform apply -var="database_id=YOUR-DB-ID" \
-                -var="sql_bucket=YOUR-BUCKET" \
-                -var="vpc_id=vpc-xxxxx" \
-                -var="subnet_ids=[\"subnet-xxxxx\",\"subnet-yyyyy\"]"
-```
-
-### 3. Create Database User
-
-Create the MySQL user for Lambda using IAM authentication:
-
-```sql
-CREATE USER 'lambda_perf_schema'@'%' IDENTIFIED WITH AWSAuthenticationPlugin AS 'RDS';
-GRANT SELECT, UPDATE ON performance_schema.* TO 'lambda_perf_schema'@'%';
-GRANT SELECT ON information_schema.* TO 'lambda_perf_schema'@'%';
-FLUSH PRIVILEGES;
-```
-
-### 4. Attach Parameter Group
-
-1. Go to the AWS RDS console
-2. Select your MySQL instance or Aurora cluster
-3. Click "Modify"
-4. Under "Additional configuration", select the newly created parameter group:
-   - For CloudFormation: The group name is in stack outputs
-   - For Terraform: Use the parameter_group_name output
-5. Select "Apply immediately"
-6. Click "Continue" and "Modify DB Instance"
-
-### 5. Verify Configuration
-
-After the database reboots:
-
-```sql
--- Check if Performance Schema is enabled
-SHOW VARIABLES LIKE 'performance_schema';
-
--- Check consumer status
-SELECT NAME, ENABLED FROM performance_schema.setup_consumers
- WHERE NAME IN ('events_statements_current','statements_digest');
-
--- Check instrument status
-SELECT NAME, ENABLED, TIMED FROM performance_schema.setup_instruments
- WHERE NAME LIKE 'statement/%' LIMIT 5;
-```
-
-Also check the Lambda CloudWatch logs to verify successful execution.
-If you see `UPDATE` permission errors, re-run the GRANT above (the extra
-`UPDATE` privilege is **required** as of v2025-05-03).
+Detailed instructions for both approaches are available in our [Implementation Guide](docs/02-implementation.md).
 
 ## Documentation
 
 | Resource | Description |
 |----------|-------------|
-| [Technical Guide](docs/GUIDE.md) | Detailed explanation of the solution architecture |
-| [Troubleshooting](docs/TROUBLESHOOTING.md) | Solutions for common issues |
+| [Overview](docs/00-overview.md) | Introduction and solution overview |
+| [Strategy Guide](docs/01-strategy.md) | Decision tree and approach selection |
+| [Implementation Guide](docs/02-implementation.md) | Step-by-step implementation instructions |
+| [Troubleshooting Guide](docs/03-troubleshooting.md) | Solutions for common issues |
 | [CloudFormation Deployment](cloudformation/README.md) | CloudFormation template details |
 | [Terraform Deployment](terraform/README.md) | Terraform module usage |
 | [SQL Configuration](sql/README.md) | Understanding and customizing the target configuration |
 
-## Customizing Configuration
+## Performance Insights vs. Lambda Automation
 
-To customize which Performance Schema components are enabled/disabled, edit the `sql/target-config.yaml` file and update it in S3.
+For most MySQL/Aurora workloads on AWS, we recommend:
+
+1. **Start with Performance Insights** for simple, managed Performance Schema configuration
+2. **Add Parameter Group settings** for optimizing buffer sizes and specific flags
+3. **Use Lambda automation** only for specialized monitoring needs not covered by PI
+
+See our [Strategy Guide](docs/01-strategy.md) for detailed recommendations.
 
 ## Support
 
 For assistance, contact New Relic DB Engineering: db-support@newrelic.com
-
-_Related AWS feature_: **Performance Insights** is a managed alternative; see Appendix in docs/GUIDE.md.
