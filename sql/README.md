@@ -8,6 +8,8 @@ This directory contains SQL scripts and the target configuration YAML file for P
 - `perf-schema-configuration.sql` - SQL script with manual configuration commands
 - `verification.sql` - Queries to verify the configuration is applied correctly
 
+**Important: target-config.yaml is authoritative; .sql scripts are for manual experiments only.** The Lambda automation and all infrastructure code reference only the YAML configuration.
+
 ## Target Configuration YAML
 
 The `target-config.yaml` file defines which Performance Schema components should be enabled and disabled. This file is read by the Lambda function to determine what changes to apply.

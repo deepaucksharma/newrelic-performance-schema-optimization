@@ -1,3 +1,11 @@
-pymysql>=1.1.0
-PyYAML>=6.0
-boto3>=1.34.0
+# Generated from requirements.in
+# This file contains the exact versions of dependencies for reproducible builds
+boto3==1.34.31
+botocore==1.34.31
+jmespath==1.0.1
+pymysql==1.1.0
+python-dateutil==2.8.2
+PyYAML==6.0.1
+s3transfer==0.10.0
+six==1.16.0
+urllib3==2.0.7
