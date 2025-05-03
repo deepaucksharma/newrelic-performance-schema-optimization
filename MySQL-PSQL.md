@@ -184,18 +184,17 @@ flowchart TB
 
 ## 5 · Capability & Blind-Spot Heat-Map
 
-Visualize coverage depth across key dimensions. (Depth: ▏=Basic ▍=Fair ▋=Good █=Excellent ❌=Missing)
+| Capability / Dimension        |   MySQL Score  |  ➜ Gap | PostgreSQL Score | Fast-Take                                           |
+| ----------------------------- | :------------: | :----: | :--------------: | --------------------------------------------------- |
+| **SQL latency (avg / P95)**   | **4** 🟩🟩🟩🟩 |    =   |  **4** 🟩🟩🟩🟩  | Both first-class via PI + engine views              |
+| **Execution stage timing**    | **4** 🟩🟩🟩🟩 | **←←** |    **0** ⬜⬜⬜⬜    | PG needs `auto_explain`; PI shows no stages         |
+| **Wait-event breakdown**      | **4** 🟩🟩🟩🟩 |  **←** |   **2** 🟩🟩⬜⬜   | PG waits coarse unless you query `pg_wait_sampling` |
+| **Lock-chain insight**        |  **3** 🟩🟩🟩⬜ |    ↔   |   **3** 🟩🟩🟩⬜  | Live views good; historical weak for both           |
+| **Memory internals**          |  **3** 🟩🟩🟩⬜ | **←←** |    **1** 🟩⬜⬜⬜   | PG relies on OS / `pg_buffercache` (not in RDS)     |
+| **Object-level I/O**          | **4** 🟩🟩🟩🟩 |  **←** |   **2** 🟩🟩⬜⬜   | PG `pg_statio_*` lacks file granularity             |
+| **Plan history / regression** |   **0** ⬜⬜⬜⬜   |    =   |    **0** ⬜⬜⬜⬜    | External tooling required on both                   |
+| **Literal-parameter capture** |   **0** ⬜⬜⬜⬜   |    =   |    **0** ⬜⬜⬜⬜    | Security & perf risk – use app tracing              |
 
-| Dimension | MySQL (P_S + PI) | PostgreSQL (Toolkit¹⁾ + PI) | Blind-Spot / AWS Limitation / Note |
-|-----------|------------------|----------------------------|-------------------------------------|
-| SQL Latency (Avg/P95) | █████ | █████ | — |
-| SQL Execution Stages | █████ | ❌ | PG needs logging (auto_explain). PI doesn't show stages. |
-| Wait Event Breakdown | █████ | ▋▍░░░ | PG PI waits are coarse. Use pg_wait_sampling directly for better PG wait history. |
-| Lock Contention Chain | ████▋ | ████▋ | Historical lock graphs weak. Needs live views (sys.innodb_lock_waits, pg_locks) or sampling/logging. |
-| Memory Internals | ████▋ | ▏░░░░ | PG needs OS/EM metrics + non-standard extensions (pg_buffercache). PI lacks memory breakdown. |
-| File/Object I/O | █████ | ▋▍░░░ | PG pg_statio_* good but lacks P_S file-level granularity. PI I/O waits lack object context. |
-| Query Plan History | ❌ | ❌ | Requires external tools/logging. pg_stat_monitor N/A on RDS/Aurora. |
-| Literal SQL Params | ❌ | ❌ | Security risk. Use logs or app tracing if essential. pg_stat_monitor N/A. |
 
 ¹⁾ Toolkit = pg_stat_activity + pg_stat_statements + pg_wait_sampling.
 
