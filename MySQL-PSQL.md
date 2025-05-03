@@ -1,18 +1,16 @@
-# Database Observability · Architecture & Physics
 
-### MySQL Performance Schema vs PostgreSQL Toolkit on AWS RDS / Aurora
+# Database Observability · Architecture & Physics
+### MySQL Performance Schema vs PostgreSQL Toolkit on AWS RDS / Aurora  
 *Version 2024-Q3 · MySQL 8.0 / Aurora MySQL 3.x · PostgreSQL 15 / Aurora PG 15.x*
 
 ---
 
-> **Audience:** Senior DBAs, SREs, DevOps needing actionable insights for AWS databases under pressure.
-> 
-> **Goal:** Explain the *physics* behind the metrics for trust, prediction, and rapid diagnostics (< 60s probe selection).
+> **Audience:** Senior DBAs, SREs, DevOps needing actionable insights for AWS databases under pressure.  
+> **Goal:** Explain the *physics* behind the metrics for trust, prediction, and rapid diagnostics (< 60 s probe selection).
 
 ---
 
 ## 🧭 Visual Index
-
 * [1. Signal Path & Architecture](#1--end-to-end-signal-path--architecture-overlay)
 * [2. Observability Physics Laws](#2--six-laws-of-observability-physics-engine-fundamentals)
 * [3. Observability Spectrum Quadrant](#3--observability-spectrum-depth-vs-ease)
@@ -27,11 +25,10 @@
 ---
 
 ## 1 · End-to-End Signal Path & Architecture Overlay
-
 How engine events become Performance Insights (PI) data points.
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{ 'fontSize':'12px'}} }%%
+%%{init: { "theme":"base", "themeVariables":{ "fontSize":"12px" } }}%%
 graph LR
     %% ───────────── Application ─────────────
     subgraph "Application / Client"
@@ -41,20 +38,20 @@ graph LR
     %% ───────────── Engine Internals ─────────────
     subgraph "Engine Internals (Data Sources)"
         direction TB
-        MYSQL_CORE[/"MySQL Engine Code"/]:::mysql -->|Instrumentation Hooks| MYSQL_PS[["Performance Schema"]:::mysql]
-        MYSQL_PS -->|In-Memory Tables| MYSQL_PSTBL[["P_S Tables<br/>+ sys Views"]]:::mysql
+        MYSQL_CORE[/MySQL Engine Code/]:::mysql -->|Instrumentation Hooks| MYSQL_PS["Performance Schema"]:::mysql
+        MYSQL_PS -->|In-Memory Tables| MYSQL_PSTBL["P_S Tables<br/>+ sys Views"]:::mysql
 
-        PG_CORE[/"PostgreSQL Engine Code"/]:::pg -->|Native State| PG_STATCOL[["Stats Collector<br/>pg_stat_activity"]]:::pg
-        PG_CORE -->|Ext Hooks| PG_STMTS[["pg_stat_statements"]]:::pg
-        PG_CORE -->|Ext Hooks| PG_WSAMPLE[["pg_wait_sampling"]]:::pg
+        PG_CORE[/PostgreSQL Engine Code/]:::pg -->|Native State| PG_STATCOL["Stats Collector<br/>pg_stat_activity"]:::pg
+        PG_CORE -->|Ext Hooks| PG_STMTS["pg_stat_statements"]:::pg
+        PG_CORE -->|Ext Hooks| PG_WSAMPLE["pg_wait_sampling"]:::pg
     end
 
     %% ───────────── Host Agent ─────────────
     subgraph "AWS Agent (on host)"
-        MYSQL_PSTBL ==> AGENT[["PI / EM Agent"]]:::agent
+        MYSQL_PSTBL ==> AGENT["PI / EM Agent"]:::agent
         PG_STATCOL ==> AGENT
-        PG_STMTS ==> AGENT
-        PG_WSAMPLE -.-> IGNORED[/"PI does NOT query pg_wait_sampling"/]
+        PG_STMTS  ==> AGENT
+        PG_WSAMPLE -.-> NOTE[/PI does **not** read pg_wait_sampling/]
     end
 
     %% ───────────── AWS Services ─────────────
@@ -70,48 +67,50 @@ graph LR
 
     %% ───────────── Styling ─────────────
     classDef mysql fill:#4479AA,stroke:#333,color:#fff;
-    classDef pg fill:#336791,stroke:#333,color:#fff;
+    classDef pg    fill:#336791,stroke:#333,color:#fff;
     classDef agent fill:#d3d3d3,stroke:#333,color:#000;
-    classDef svc fill:#f7c6ff,stroke:#333,color:#000;
+    classDef svc   fill:#f7c6ff,stroke:#333,color:#000;
 
-    linkStyle 11 stroke-dasharray:5 5,stroke:#d55,stroke-width:2px;
-
+    %% red dashed link from pg_wait_sampling to note (index = last link)
+    linkStyle 9 stroke-dasharray:5 5,stroke:#d55,stroke-width:2px;
 ```
 
 <details open>
 <summary><b>Legend</b></summary>
 
-| Line / Box | Meaning |
-|------------|---------|
-| Solid Arrow ==> | Data Flow Sampled/Queried by PI Agent |
-| Dashed Arrow ---> | Data Flow Ignored by PI Agent |
-| <span style="background-color:#4479AA;color:#fff;padding:2px 6px;border-radius:3px">MySQL Blue Box</span> | MySQL Specific Components |
-| <span style="background-color:#336791;color:#fff;padding:2px 6px;border-radius:3px">PostgreSQL Blue Box</span> | PostgreSQL Specific Components |
-| <span style="background-color:#ededed;padding:2px 6px;border-radius:3px">Grey Box</span> | AWS Managed Agent |
-| <span style="background-color:#f9f;padding:2px 6px;border-radius:3px">Pink Box</span> | AWS Aggregation/UI Service |
+| Line / Box                                                                                          | Meaning                          |
+| --------------------------------------------------------------------------------------------------- | -------------------------------- |
+| **Solid Arrow ==>**                                                                                 | Data sampled/queried by PI agent |
+| **Dashed Arrow -.->**                                                                               | Data the agent ignores           |
+| <span style="background:#4479AA;color:#fff;padding:2px 6px;border-radius:3px">MySQL box</span>      | MySQL-specific                   |
+| <span style="background:#336791;color:#fff;padding:2px 6px;border-radius:3px">PostgreSQL box</span> | PostgreSQL-specific              |
+| <span style="background:#d3d3d3;padding:2px 6px;border-radius:3px">Grey box</span>                  | AWS-managed agent                |
+| <span style="background:#f7c6ff;padding:2px 6px;border-radius:3px">Pink box</span>                  | AWS aggregation / UI             |
 
 </details>
 
-**Quick Truths:**
+**Quick Truths**
 
-* **Single-bus vs Modular:** MySQL pipes everything through P_S; Postgres scatters data across views & extensions.
-* **Agent Blind-spot:** PI never queries pg_wait_sampling; use it yourself for deep wait history.
-* **Corollary:** When PI feels "shallower" on PG for waits, it is – physics, not UI.
+* **Single-bus vs Modular:** MySQL pipes everything through P\_S; Postgres scatters data across views & extensions.
+* **Agent Blind-spot:** PI never queries `pg_wait_sampling`; query it yourself for deep wait history.
+* **Corollary:** If PI feels "shallower" on PG for waits, it is – physics, not UI.
+
+---
 
 ## 2 · Six Laws of Observability Physics (Engine Fundamentals)
 
-| # | Law | MySQL P_S Fact | PostgreSQL Toolkit Fact | Ops Rule |
-|---|-----|---------------|-------------------------|----------|
-| 1 | Hook Density | Instrumented (~2k+ code points) | ~250 Core Counters + Extension Hooks + Sampling | More hooks ⇒ deeper potential insight but also more paths for overhead. |
-| 2 | Time Resolution | Nanosecond timers | Millisecond (views) / Microsecond (sampling) | Micro-burst waits (<1ms) are reliably visible only in MySQL P_S. |
-| 3 | Context Chain | Linked Events (THREAD_ID, NESTING_EVENT_ID) | Disconnected Snapshots / Aggregates | MySQL traces causality ("Wait X during Stage Y"). PG requires correlation. |
-| 4 | Memory Topology | Pre-allocated Fixed Buffers/Rings | Dynamic Shared Memory Segments (Extensions) | MySQL: Size correctly at Reboot or lose data silently (*_lost>0). PG may evict LRU data when full. |
-| 5 | Wait Taxonomy | ~300+ Hierarchical Names (wait/type/...) | ~40+ Flat Names (WaitType:WaitEvent) | Expect vaguer wait categories in PG PI. Use pg_wait_sampling directly for richer PG wait history. |
-| 6 | Overhead Curve | O(Events × Enabled Instruments) | O(SQL Rate (stmts) + Sample Rate (sampling)) | MySQL overhead driven by what you enable. PG overhead driven by workload rate & sampling config. |
+| # | Law             | MySQL P\_S Fact                                 | PostgreSQL Toolkit Fact                          | Ops Rule                                                           |
+| - | --------------- | ----------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------ |
+| 1 | Hook Density    | Instrumented (\~2k+ code points)                | ≈ 250 core counters + extension hooks + sampling | More hooks ⇒ deeper insight **and** more overhead risk.            |
+| 2 | Time Resolution | Nanosecond timers                               | Millisecond (views) / Microsecond (sampling)     | < 1 ms waits visible only in MySQL P\_S.                           |
+| 3 | Context Chain   | Linked events (`THREAD_ID`, `NESTING_EVENT_ID`) | Disconnected snapshots / aggregates              | MySQL traces causality; PG needs manual correlation.               |
+| 4 | Memory Topology | Pre-allocated fixed buffers                     | Dynamic shared-memory segments                   | MySQL: size right or lose data (`*_lost`). PG may evict LRU data.  |
+| 5 | Wait Taxonomy   | ≈ 300 hierarchical names                        | ≈ 40 flat names                                  | PG waits coarser in PI; use `pg_wait_sampling` for detail.         |
+| 6 | Overhead Curve  | O(events × enabled instruments)                 | O(query-rate + sample-rate)                      | MySQL overhead driven by *what* you enable; PG by *workload rate*. |
+
+---
 
 ## 3 · Observability Spectrum: Depth vs Ease (AWS Context)
-
-This quadrant chart helps visualize the trade-offs. Higher up = more depth/granularity. Further right = easier setup/use within AWS managed services.
 
 ```
 Depth / Granularity
@@ -144,33 +143,44 @@ Low   │                   │           LOW EASE                │
         Low                         Ease of Setup / Use           High
 ```
 
-**Insight:** PI significantly boosts ease-of-use. MySQL + PI reaches higher native depth, especially for waits. Achieving deep PG visibility requires more manual effort combining tools like pg_wait_sampling.
+**Insight:** PI boosts ease-of-use. MySQL + PI still reaches greater native depth (esp. waits). Deep PG visibility needs extra tools like `pg_wait_sampling`.
+
+---
 
 ## 4 · Layered Capability Model
 
-Observability builds in layers, from basic metrics to actionable insights.
-
 ```mermaid
+%%{init:{ "theme":"base" }}%%
 flowchart TB
-  subgraph "Layer 4: Insight & Automation"
-    L4[Performance Insights Dashboard/API<br/>CloudWatch Alarms<br/>Custom Reporting/Automation]:::top
-  end
-  subgraph "Layer 3: History & Aggregates"
-    L3[P_S Summaries (`events_*_summary_*`)<br/>`pg_stat_statements`<br/>`pg_wait_sampling`<br/>PI Data Retention]:::mid
-  end
-  subgraph "Layer 2: Real-time & Recent Context"
-    L2[P_S Current/History (`events_*_current`/`_history*`)<br/>`pg_stat_activity`<br/>Lock Views (`pg_locks`, `sys.innodb_lock_waits`)<br/>DB Logs (Slow Query, Error)]:::mid
-  end
-  subgraph "Layer 1: Foundational Metrics"
-    L1[Engine Instrumentation Hooks<br/>Core Stats Collector<br/>CloudWatch Standard Metrics<br/>Enhanced Monitoring (OS)]:::base
-  end
-  L1 --> L2 --> L3 --> L4
-  classDef base fill:#eee,stroke:#999,color:#333
-  classDef mid fill:#cce,stroke:#666,color:#333
-  classDef top fill:#f9f,stroke:#333,color:#333
+    %% ───────────── Layers ─────────────
+    subgraph "Layer 4 · Insight & Automation"
+        L4["Performance Insights Dashboard / API<br/>CloudWatch Alarms<br/>Custom Automation"]:::top
+    end
+
+    subgraph "Layer 3 · History & Aggregates"
+        L3["P_S Summaries (events_*_summary)\npg_stat_statements\npg_wait_sampling\nPI Retention (>7 d)"]:::mid
+    end
+
+    subgraph "Layer 2 · Real-time & Recent Context"
+        L2["P_S Current / History\npg_stat_activity\nLock Views (pg_locks / sys.innodb_lock_waits)\nDB Logs"]:::mid
+    end
+
+    subgraph "Layer 1 · Foundational Metrics"
+        L1["Engine Instrumentation Hooks\nCore Stats Collector\nCloudWatch Std Metrics\nEnhanced Monitoring (OS)"]:::base
+    end
+
+    %% ───────────── Flow ─────────────
+    L1 --> L2 --> L3 --> L4
+
+    %% ───────────── Styling ─────────────
+    classDef base fill:#eeeeee,stroke:#888,color:#000;
+    classDef mid  fill:#c8d4ff,stroke:#666,color:#000;
+    classDef top  fill:#f7c6ff,stroke:#333,color:#000;
 ```
 
-**Insight:** Effective troubleshooting often involves traversing these layers – starting with PI (L4), identifying patterns in aggregates (L3), examining real-time state (L2), and correlating with base metrics (L1).
+**Insight:** Troubleshooting often walks *up* these layers: PI → Aggregates → Real-time → Engine hooks/OS.
+
+---
 
 ## 5 · Capability & Blind-Spot Heat-Map
 
@@ -189,6 +199,8 @@ Visualize coverage depth across key dimensions. (Depth: ▏=Basic ▍=Fair ▋=G
 
 ¹⁾ Toolkit = pg_stat_activity + pg_stat_statements + pg_wait_sampling.
 
+---
+
 ## 6 · Resource Guardrails ⚖️: Quick Overhead Budgeting
 
 Estimate before enabling! Use CloudWatch/EM to verify post-change.
@@ -203,29 +215,9 @@ Estimate before enabling! Use CloudWatch/EM to verify post-change.
 ¹⁾ Rough estimates. P_S digests_size, PG pg_stat_statements.max. P_S History RAM complex.
 ²⁾ Typical % increase relative to baseline CPU. Highly workload dependent.
 
-<details>
-<summary><b>Visual Budget Check (Example: Target < 15% Extra RAM, < 7% Extra CPU)</b></summary>
-
-```mermaid
-%%{init: { 'theme':'base' }}%%
-flowchart LR
-    subgraph "Estimated Overhead Budget"
-        RAM[RAM] -->|P_S RAM 12 %| RAM_LIMIT((15 % Limit))
-        CPU[CPU] -->|Total CPU 4 %| CPU_LIMIT((7 % Limit))
-    end
-
-    classDef ok fill:#e0ffe0,stroke:#1a9850,stroke-width:2px;
-    classDef warn fill:#ffe0e0,stroke:#d73027,stroke-width:2px;
-
-    class RAM_LIMIT,CPU_LIMIT ok
-
-```
-
-(Replace values with your estimates. Use Red stroke for limit exceeded)
-
-</details>
-
 **Safety Rule:** Aim for < 5-7% total additional CPU overhead. Keep P_S RAM < 10-15% FreeableMemory. Test under representative load.
+
+---
 
 ## 7 · First-Five Probes ⚡: Your < 60 Second Diagnostic Start
 
@@ -337,6 +329,8 @@ SHOW track_activity_query_size;
 SELECT extname FROM pg_extension WHERE extname IN ('pg_stat_statements', 'pg_wait_sampling');
 ```
 
+---
+
 ## 8 · Workload-Optimized Config Templates (Parameter Group Settings)
 
 | Pattern | MySQL Snippet (Parameter Group) | PostgreSQL Snippet (Parameter Group) | Rationale |
@@ -347,6 +341,8 @@ SELECT extname FROM pg_extension WHERE extname IN ('pg_stat_statements', 'pg_wai
 
 Parameter Group changes involving static parameters or shared_preload_libraries require an instance Reboot 🚨.
 
+---
+
 ## 9 · Top-5 Anti-patterns & Fixes
 
 | Anti-pattern | Why it Hurts | Quick Fix ✅ / Link 🔗 |
@@ -356,6 +352,8 @@ Parameter Group changes involving static parameters or shared_preload_libraries 
 | 3. Enabling pg_wait_sampling.profile_queries=ON always (PG) | Significant CPU overhead (~+5-10%+) due to constant lookup/correlation. | ✅ Keep OFF by default. Enable temporarily only for deep dives. [See Resource Guardrails](#6--resource-guardrails--overhead-budgeting) |
 | 4. Hitting P_S digest_lost > 0 (MySQL) | New/infrequent query patterns aren't tracked; PI Top SQL becomes inaccurate. | ✅ Increase performance_schema_digests_size in PG & Reboot 🚨. [See Resource Guardrails](#6--resource-guardrails--overhead-budgeting) |
 | 5. Assuming PI Wait Events (PG) == P_S Wait Events (MySQL) Granularity | Leads to misdiagnosis; PG waits are coarser, lack deep internal context. | ✅ Understand the difference (Law #5). Use pg_wait_sampling direct queries for PG wait history. [See Physics Laws](#2--six-laws-of-observability-physics-engine-fundamentals) |
+
+---
 
 ## 10 · Strategic Rules of Thumb
 
@@ -368,4 +366,3 @@ Parameter Group changes involving static parameters or shared_preload_libraries 
 * **Layer Intelligently:** Combine PI, engine tools, Enhanced Monitoring (OS stats), and application logs for a holistic view. Add pg_wait_sampling for better PG wait history.
 
 * **Measure & Automate:** Establish baseline overhead. Automate checks for config drift (*_lost, query size, extension status) to prevent silent monitoring failures.
-
